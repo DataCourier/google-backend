@@ -1,0 +1,300 @@
+# Local Development Guide
+
+Test changes locally before deploying to Cloud Run (way faster than 2-minute deploys!).
+
+---
+
+## Prerequisites
+
+### 1. Install Go
+
+```bash
+# Check if Go is installed
+go version
+
+# If not installed, install Go 1.23+
+wget https://go.dev/dl/go1.23.0.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz
+
+# Add to PATH (add to ~/.bashrc or ~/.zshrc)
+export PATH=$PATH:/usr/local/go/bin
+
+# Verify
+go version
+```
+
+### 2. Set Up Firebase Credentials
+
+**Option A: Use your existing gcloud credentials** (easiest)
+```bash
+# gcloud will automatically use your credentials
+gcloud auth application-default login
+```
+
+**Option B: Service account key** (if needed)
+```bash
+# Download service account key from Firebase Console
+# https://console.firebase.google.com/project/YOUR_PROJECT/settings/serviceaccounts
+
+# Set environment variable
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/serviceAccountKey.json"
+```
+
+---
+
+## Running Services Locally
+
+### Game Service
+
+```bash
+cd services/game-service
+
+# Set project ID
+export GCP_PROJECT=michal-playground-2026
+
+# Install dependencies
+go mod download
+
+# Run
+go run main.go
+```
+
+Visit: http://localhost:8080
+
+### User Service
+
+```bash
+cd services/user-service
+
+# Set project ID
+export GCP_PROJECT=michal-playground-2026
+
+# Run
+go run main.go
+```
+
+Visit: http://localhost:8080
+
+---
+
+## Local Development Workflow
+
+### 1. Make Changes
+
+Edit files in `services/game-service/`:
+```bash
+nano main.go
+nano views/game.html
+nano models/game.go
+```
+
+### 2. Test Locally
+
+```bash
+# Kill previous process (Ctrl+C or)
+pkill -f "go run"
+
+# Run again
+go run main.go
+```
+
+Changes take ~1-2 seconds to restart (vs 2 minutes for Cloud Run!).
+
+### 3. Test in Browser
+
+```bash
+# Open in browser
+xdg-open http://localhost:8080
+
+# Or use curl
+curl http://localhost:8080/
+```
+
+### 4. Deploy When Ready
+
+```bash
+# From backend root
+make deploy-game
+
+# Or manually
+gcloud run deploy game-service --source . --region us-central1 --allow-unauthenticated
+```
+
+---
+
+## Hot Reload (Optional)
+
+For even faster iteration, use `air` for auto-reload on file changes:
+
+```bash
+# Install air
+go install github.com/cosmtrek/air@latest
+
+# Create .air.toml config
+cat > .air.toml << 'EOF'
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  args_bin = []
+  bin = "./tmp/main"
+  cmd = "go build -o ./tmp/main ."
+  delay = 1000
+  exclude_dir = ["assets", "tmp", "vendor", "testdata"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = ""
+  include_dir = []
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  include_file = []
+  kill_delay = "0s"
+  log = "build-errors.log"
+  poll = false
+  poll_interval = 0
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = false
+  stop_on_error = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  time = false
+
+[misc]
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true
+EOF
+
+# Run with hot reload
+air
+```
+
+Now edit files and they auto-reload!
+
+---
+
+## Debugging
+
+### Print Debugging
+
+```go
+// Add to handlers
+log.Printf("DEBUG: gameID=%s, token=%s", gameID, token)
+log.Printf("DEBUG: game data: %+v", game)
+```
+
+Logs appear in terminal immediately.
+
+### Check Firestore Data
+
+```bash
+# List all games
+gcloud firestore databases documents list --collection=games
+
+# Get specific game
+gcloud firestore databases documents get games/GAME_ID
+```
+
+### Test API Endpoints
+
+```bash
+# Create game
+curl -X POST http://localhost:8080/games/create -L
+
+# View game
+curl "http://localhost:8080/games/GAME_ID?token=TOKEN"
+
+# Make move
+curl -X POST "http://localhost:8080/games/GAME_ID/move?token=TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"position": 4}'
+```
+
+---
+
+## Common Issues
+
+### "Firestore client: permission denied"
+
+Make sure you're authenticated:
+```bash
+gcloud auth application-default login
+```
+
+### "Template not found"
+
+Make sure you're running from the service directory:
+```bash
+cd services/game-service  # Important!
+go run main.go
+```
+
+Templates are loaded from `views/` relative to current directory.
+
+### Port already in use
+
+Kill the previous process:
+```bash
+lsof -ti:8080 | xargs kill
+# or
+pkill -f "go run"
+```
+
+### Changes not reflecting
+
+Make sure you restarted the server (Ctrl+C, then run again).
+
+---
+
+## Tips
+
+### Use tmux/screen for multiple services
+
+```bash
+# Terminal 1
+cd services/game-service && go run main.go
+
+# Terminal 2
+cd services/user-service && go run main.go
+
+# Terminal 3
+curl http://localhost:8080  # test game-service
+curl http://localhost:8081  # test user-service
+```
+
+### Quick test script
+
+```bash
+#!/bin/bash
+# test-local.sh
+
+echo "Creating game..."
+LOCATION=$(curl -sI -X POST http://localhost:8080/games/create | grep location: | cut -d' ' -f2 | tr -d '\r')
+FULL_URL="http://localhost:8080$LOCATION"
+
+echo "Game URL: $FULL_URL"
+echo "Opening in browser..."
+xdg-open "$FULL_URL"
+```
+
+---
+
+## Next Steps
+
+- Try local dev now (way faster!)
+- Deploy when ready with `make deploy-game`
+- Local dev = instant feedback, Cloud Run = production testing
