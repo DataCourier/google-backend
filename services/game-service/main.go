@@ -10,6 +10,8 @@ import (
 	"os"
 
 	"cloud.google.com/go/firestore"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/yourusername/my-app-backend/services/game-service/models"
 )
 
@@ -34,15 +36,21 @@ func main() {
 	}
 	defer firestoreClient.Close()
 
-	// Parse templates
-	templates = template.Must(template.ParseGlob("views/*.html"))
+	// Parse templates with proper inheritance
+	templates = template.Must(template.New("").ParseGlob("views/*.html"))
 
-	// Setup routes
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", homeHandler)
-	mux.HandleFunc("POST /games/create", createGameHandler)
-	mux.HandleFunc("GET /games/{gameId}", viewGameHandler)
-	mux.HandleFunc("POST /games/{gameId}/move", makeMoveHandler)
+	// Setup routes with chi router
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
+	// Specific routes first
+	r.Post("/games/{gameId}/move", makeMoveHandler)
+	r.Get("/games/{gameId}", viewGameHandler)
+	r.Post("/games/create", createGameHandler)
+
+	// Catch-all route last
+	r.Get("/", homeHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -50,7 +58,7 @@ func main() {
 	}
 
 	log.Printf("Starting game-service on port %s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -79,7 +87,7 @@ func createGameHandler(w http.ResponseWriter, r *http.Request) {
 
 func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	gameID := r.PathValue("gameId")
+	gameID := chi.URLParam(r, "gameId")
 	token := r.URL.Query().Get("token")
 
 	if token == "" {
@@ -151,7 +159,7 @@ func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 
 func makeMoveHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	gameID := r.PathValue("gameId")
+	gameID := chi.URLParam(r, "gameId")
 	token := r.URL.Query().Get("token")
 
 	if token == "" {
