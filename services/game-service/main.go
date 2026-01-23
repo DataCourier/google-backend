@@ -65,40 +65,50 @@ func main() {
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("→ homeHandler: %s %s", r.Method, r.URL.Path)
+
 	if err := templates.ExecuteTemplate(w, "home.html", nil); err != nil {
-		log.Printf("Template error: %v", err)
+		log.Printf("✗ homeHandler: template error: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
 	}
+
+	log.Printf("✓ homeHandler: rendered home.html")
 }
 
 func createGameHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("→ createGameHandler: %s %s", r.Method, r.URL.Path)
 	ctx := r.Context()
 
 	game, err := models.CreateGame(ctx, firestoreClient)
 	if err != nil {
-		log.Printf("Error creating game: %v", err)
+		log.Printf("✗ createGameHandler: failed to create game: %v", err)
 		http.Error(w, "Failed to create game", http.StatusInternalServerError)
 		return
 	}
 
 	// Redirect player X to their game URL
 	playerXURL := fmt.Sprintf("/games/%s?token=%s", game.ID, game.PlayerXToken)
+	log.Printf("✓ createGameHandler: created game %s, redirecting to %s", game.ID, playerXURL)
 	http.Redirect(w, r, playerXURL, http.StatusSeeOther)
 }
 
 func viewGameHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	gameID := chi.URLParam(r, "gameId")
+	log.Printf("→ viewGameHandler: %s %s (gameID=%s)", r.Method, r.URL.Path, gameID)
+
+	ctx := r.Context()
 	token := r.URL.Query().Get("token")
 
 	if token == "" {
+		log.Printf("✗ viewGameHandler: missing token")
 		http.Error(w, "Missing token", http.StatusBadRequest)
 		return
 	}
 
 	game, err := models.GetGame(ctx, firestoreClient, gameID)
 	if err != nil {
-		log.Printf("Error getting game: %v", err)
+		log.Printf("✗ viewGameHandler: game not found: %v", err)
 		http.Error(w, "Game not found", http.StatusNotFound)
 		return
 	}
@@ -106,9 +116,12 @@ func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate token and determine player
 	player, err := game.ValidateToken(token)
 	if err != nil {
+		log.Printf("✗ viewGameHandler: invalid token")
 		http.Error(w, "Invalid token", http.StatusForbidden)
 		return
 	}
+
+	log.Printf("  viewGameHandler: player=%s, turn=%s, winner=%s", player, game.CurrentTurn, game.Winner)
 
 	// Build template data
 	data := map[string]interface{}{
@@ -152,17 +165,21 @@ func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("DEBUG: Executing game template for game %s", gameID)
-	log.Printf("DEBUG: Data: %+v", data)
+	log.Printf("  viewGameHandler: rendering template 'game.html' with data keys: %v", getKeys(data))
 	if err := templates.ExecuteTemplate(w, "game.html", data); err != nil {
-		log.Printf("Template error: %v", err)
+		log.Printf("✗ viewGameHandler: template error: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
 	}
+
+	log.Printf("✓ viewGameHandler: rendered game.html")
 }
 
 func makeMoveHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	gameID := chi.URLParam(r, "gameId")
+	log.Printf("→ makeMoveHandler: %s %s (gameID=%s)", r.Method, r.URL.Path, gameID)
+
+	ctx := r.Context()
 	token := r.URL.Query().Get("token")
 
 	if token == "" {
@@ -206,7 +223,9 @@ func makeMoveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Make move
+	log.Printf("  makeMoveHandler: player=%s attempting move at position %d", player, req.Position)
 	if err := game.MakeMove(ctx, firestoreClient, player, req.Position); err != nil {
+		log.Printf("✗ makeMoveHandler: invalid move: %v", err)
 		respondJSON(w, http.StatusBadRequest, map[string]string{
 			"error":   "invalid_move",
 			"message": err.Error(),
@@ -214,6 +233,7 @@ func makeMoveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("✓ makeMoveHandler: move successful, winner=%s", game.Winner)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Move made successfully",
 		"board":   game.Board,

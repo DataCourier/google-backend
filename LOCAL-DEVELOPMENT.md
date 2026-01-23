@@ -4,6 +4,27 @@ Test changes locally before deploying to Cloud Run (way faster than 2-minute dep
 
 ---
 
+## Quick Start
+
+```bash
+# 1. Navigate to service
+cd services/game-service
+
+# 2. Set environment variables
+export PATH=$HOME/go/bin:$PATH
+export GCP_PROJECT=michal-playground-2026
+
+# 3. Run the service
+go run main.go
+
+# 4. Test in another terminal
+curl http://localhost:8080/
+```
+
+Server starts in ~2 seconds. Edit code, restart (Ctrl+C, re-run), test. Way faster than Cloud Run!
+
+---
+
 ## Prerequisites
 
 ### 1. Install Go
@@ -187,7 +208,38 @@ Now edit files and they auto-reload!
 
 ---
 
-## Debugging
+## Understanding the Logs
+
+The service now logs each request with MVC-style flow:
+
+```
+→ homeHandler: GET /                          # Handler entry
+✓ homeHandler: rendered home.html             # Success
+
+→ createGameHandler: POST /games/create       # Handler entry
+✓ createGameHandler: created game abc123...   # Success + redirect
+
+→ viewGameHandler: GET /games/abc123          # Handler entry
+  viewGameHandler: player=X, turn=X...        # Context info
+  viewGameHandler: rendering template...       # About to render
+✓ viewGameHandler: rendered game.html         # Success
+
+✗ viewGameHandler: game not found             # Error
+```
+
+**Log symbols:**
+- `→` - Handler invoked
+- `✓` - Successful completion
+- `✗` - Error occurred
+- ` ` (indent) - Additional context
+
+This helps you see:
+- Which handler is executing
+- If multiple handlers fire for one URL
+- Where failures occur
+- Template rendering flow
+
+### Debugging
 
 ### Print Debugging
 
@@ -275,6 +327,22 @@ cd services/user-service && go run main.go
 curl http://localhost:8080  # test game-service
 curl http://localhost:8081  # test user-service
 ```
+
+### Verify Routes Are Working
+
+```bash
+# Test each route and check logs
+curl -v http://localhost:8080/                              # Should hit homeHandler
+curl -v -X POST http://localhost:8080/games/create          # Should hit createGameHandler
+curl -v "http://localhost:8080/games/test?token=abc"        # Should hit viewGameHandler
+curl -v -X POST "http://localhost:8080/games/test/move?token=abc" \
+  -H "Content-Type: application/json" \
+  -d '{"position": 0}'                                       # Should hit makeMoveHandler
+```
+
+Check the logs - you should see exactly one `→` per request (one handler fires).
+
+If you see multiple handlers firing for one URL, there's a route conflict.
 
 ### Quick test script
 
