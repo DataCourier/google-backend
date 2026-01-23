@@ -1,0 +1,27 @@
+# Backend Configuration
+# Edit these values when copying to a new project
+
+project:
+  name: "my-app"                          # Used in module paths and service names
+  firebase_project_id: "michal-playground-2026"  # Your Firebase/GCP project ID
+  gcp_region: "us-central1"               # Cloud Run deployment region
+  module_path: "github.com/yourusername/my-app-backend"  # Go module import path
+
+services:
+  - name: user-service
+    enabled: true
+    port: 8080
+
+  - name: game-service
+    enabled: true
+    port: 8081
+
+  - name: org-service
+    enabled: false  # Not implemented yet
+    port: 8082
+
+auth:
+  magic_link_enabled: true
+  google_oauth_enabled: false
+
+environment: dev  # dev, staging, prod

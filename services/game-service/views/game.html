@@ -1,0 +1,211 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Game {{.GameID}} - Tic-Tac-Toe{{end}}
+
+{{define "styles"}}
+<style>
+    .game-container {
+        max-width: 600px;
+        margin: 0 auto;
+        text-align: center;
+    }
+    .status {
+        font-size: 24px;
+        margin: 20px 0;
+        font-weight: bold;
+        color: #2c3e50;
+    }
+    .share-link {
+        margin: 30px 0;
+        padding: 20px;
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .share-link strong {
+        display: block;
+        margin-bottom: 15px;
+        color: #2c3e50;
+        font-size: 16px;
+    }
+    .share-link input {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        font-family: monospace;
+    }
+    .copy-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+        cursor: pointer;
+        background: #27ae60;
+        color: white;
+        border: none;
+        border-radius: 5px;
+    }
+    .copy-btn:hover {
+        background: #229954;
+    }
+    .board {
+        display: grid;
+        grid-template-columns: repeat(3, 120px);
+        grid-template-rows: repeat(3, 120px);
+        gap: 8px;
+        margin: 30px auto;
+        width: fit-content;
+        padding: 20px;
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .cell {
+        width: 120px;
+        height: 120px;
+        border: 3px solid #bdc3c7;
+        background: #ecf0f1;
+        font-size: 60px;
+        font-weight: bold;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        transition: all 0.2s;
+    }
+    .cell:hover:not(.taken) {
+        background: #d5dbdb;
+        transform: scale(1.05);
+        border-color: #3498db;
+    }
+    .cell.taken {
+        cursor: not-allowed;
+        background: #f8f9fa;
+    }
+    .cell.x { color: #e74c3c; }
+    .cell.o { color: #3498db; }
+    .winner {
+        color: #27ae60;
+        font-size: 36px;
+        margin: 30px 0;
+        font-weight: bold;
+        animation: bounce 0.5s;
+    }
+    @keyframes bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-20px); }
+    }
+    .new-game-btn {
+        padding: 15px 30px;
+        font-size: 18px;
+        cursor: pointer;
+        background: #3498db;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        margin-top: 20px;
+    }
+    .new-game-btn:hover {
+        background: #2980b9;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="game-container">
+    <div class="status">{{.Status}}</div>
+
+    {{if .ShowShareLink}}
+    <div class="share-link">
+        <strong>📤 Share this link with your opponent:</strong>
+        <input type="text" readonly value="{{.OpponentURL}}" id="shareLink" onclick="this.select()" />
+        <button class="copy-btn" onclick="copyLink()">📋 Copy Link</button>
+    </div>
+    {{end}}
+
+    {{if .Winner}}
+    <div class="winner">
+        {{if eq .Winner "draw"}}
+            🤝 Game ended in a draw!
+        {{else}}
+            🎉 Player {{.Winner}} wins!
+        {{end}}
+    </div>
+    <form action="/games/create" method="POST">
+        <button type="submit" class="new-game-btn">Play Again</button>
+    </form>
+    {{end}}
+
+    <div class="board">
+        {{range $i, $cell := .Board}}
+        <div class="cell {{if ne $cell ""}}taken{{end}} {{if eq $cell "X"}}x{{else if eq $cell "O"}}o{{end}}"
+             onclick="makeMove({{$i}})"
+             data-position="{{$i}}">
+            {{$cell}}
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+    const gameId = "{{.GameID}}";
+    const token = "{{.Token}}";
+    const currentPlayer = "{{.Player}}";
+    const currentTurn = "{{.CurrentTurn}}";
+    const winner = "{{.Winner}}";
+
+    function makeMove(position) {
+        if (winner !== "") {
+            alert("Game is finished!");
+            return;
+        }
+
+        if (currentTurn !== currentPlayer) {
+            alert("Not your turn! Wait for opponent.");
+            return;
+        }
+
+        fetch(`/games/${gameId}/move?token=${token}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position: position })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.message || data.error);
+            } else {
+                location.reload();
+            }
+        })
+        .catch(err => {
+            alert('Error making move: ' + err);
+        });
+    }
+
+    function copyLink() {
+        const input = document.getElementById('shareLink');
+        input.select();
+        document.execCommand('copy');
+
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        btn.style.background = '#27ae60';
+
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.style.background = '';
+        }, 2000);
+    }
+
+    // Auto-refresh every 3 seconds if waiting for opponent
+    if (winner === "" && currentTurn !== currentPlayer) {
+        setTimeout(() => location.reload(), 3000);
+    }
+</script>
+{{end}}

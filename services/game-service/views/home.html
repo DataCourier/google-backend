@@ -1,0 +1,98 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Tic-Tac-Toe - Play with Friends{{end}}
+
+{{define "styles"}}
+<style>
+    .hero {
+        text-align: center;
+        padding: 40px 20px;
+    }
+    .hero h2 {
+        font-size: 48px;
+        color: #2c3e50;
+        margin-bottom: 20px;
+    }
+    .hero .subtitle {
+        font-size: 20px;
+        color: #7f8c8d;
+        margin-bottom: 40px;
+    }
+    .cta-button {
+        padding: 20px 40px;
+        font-size: 24px;
+        cursor: pointer;
+        background: #3498db;
+        color: white;
+        border: none;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: all 0.3s;
+    }
+    .cta-button:hover {
+        background: #2980b9;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 8px rgba(0,0,0,0.15);
+    }
+    .features {
+        background: white;
+        padding: 40px;
+        border-radius: 10px;
+        margin-top: 60px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .features h3 {
+        color: #2c3e50;
+        margin-bottom: 20px;
+        font-size: 24px;
+    }
+    .features ul {
+        list-style: none;
+    }
+    .features li {
+        margin: 15px 0;
+        font-size: 18px;
+        color: #555;
+        padding-left: 30px;
+        position: relative;
+    }
+    .features li:before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: #27ae60;
+        font-weight: bold;
+        font-size: 20px;
+    }
+    .note {
+        text-align: center;
+        margin-top: 30px;
+        font-size: 14px;
+        color: #95a5a6;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="hero">
+    <h2>Play Tic-Tac-Toe</h2>
+    <div class="subtitle">Challenge anyone, anywhere</div>
+
+    <form action="/games/create" method="POST">
+        <button type="submit" class="cta-button">🎯 Create New Game</button>
+    </form>
+</div>
+
+<div class="features">
+    <h3>How it works</h3>
+    <ul>
+        <li>Click "Create New Game" to start</li>
+        <li>Share your unique link with a friend</li>
+        <li>Take turns making moves</li>
+        <li>First to get 3 in a row wins!</li>
+    </ul>
+    <div class="note">
+        No signup required • Each game gets a unique URL • Play instantly
+    </div>
+</div>
+{{end}}

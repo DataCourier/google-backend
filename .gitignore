@@ -1,0 +1,53 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.sum
+
+# Build artifacts
+/bin/
+/pkg/
+/vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.pem
+*.key
+
+# Firebase / GCP credentials
+*-credentials.json
+firebase-credentials.json
+service-account.json
+
+# Logs
+*.log
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Cloud Build
+.gcloudignore
+
+# Synced files (these are copied from /shared during setup.sh)
+# Keep them in git after setup, but don't manually edit them
+# Edit the originals in /shared instead
