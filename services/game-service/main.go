@@ -40,6 +40,12 @@ func main() {
 	// and can reference layout.html
 	templates = template.Must(template.ParseGlob("views/*.html"))
 
+	// Debug: List all defined templates
+	log.Printf("Loaded templates:")
+	for _, t := range templates.Templates() {
+		log.Printf("  - %s", t.Name())
+	}
+
 	// Setup routes with chi router
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -166,13 +172,27 @@ func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("  viewGameHandler: rendering template 'game.html' with data keys: %v", getKeys(data))
-	if err := templates.ExecuteTemplate(w, "game.html", data); err != nil {
+
+	// Debug: Check which template we're executing
+	t := templates.Lookup("game.html")
+	if t == nil {
+		log.Printf("✗ viewGameHandler: template 'game.html' not found!")
+		log.Printf("  Available templates:")
+		for _, tmpl := range templates.Templates() {
+			log.Printf("    - %s", tmpl.Name())
+		}
+		http.Error(w, "Template not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Use the inline template (no inheritance)
+	if err := templates.ExecuteTemplate(w, "game-inline.html", data); err != nil {
 		log.Printf("✗ viewGameHandler: template error: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✓ viewGameHandler: rendered game.html")
+	log.Printf("✓ viewGameHandler: rendered game-inline.html")
 }
 
 func makeMoveHandler(w http.ResponseWriter, r *http.Request) {
