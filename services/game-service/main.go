@@ -36,8 +36,9 @@ func main() {
 	}
 	defer firestoreClient.Close()
 
-	// Parse templates with proper inheritance
-	templates = template.Must(template.New("").ParseGlob("views/*.html"))
+	// Parse templates - each template file is parsed independently
+	// and can reference layout.html
+	templates = template.Must(template.ParseGlob("views/*.html"))
 
 	// Setup routes with chi router
 	r := chi.NewRouter()
@@ -151,6 +152,8 @@ func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	log.Printf("DEBUG: Executing game template for game %s", gameID)
+	log.Printf("DEBUG: Data: %+v", data)
 	if err := templates.ExecuteTemplate(w, "game.html", data); err != nil {
 		log.Printf("Template error: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
