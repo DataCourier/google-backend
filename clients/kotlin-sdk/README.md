@@ -302,20 +302,31 @@ class Article : PersonalActiveRecord() {
 
 ## Query Filters
 
-Filter data on the backend with equality queries:
+Query from backend with the model's companion methods:
 
 ```kotlin
-// Get all notes
-val all = client.listPersonal("notes")
+// Fetch all from backend
+val notes = Note.fetchAll()
 
 // Filter by single field
-val active = client.listPersonal("notes", mapOf("status" to "active"))
+val active = Note.query("status" to "active")
 
 // Filter by multiple fields (AND)
-val urgentActive = client.listPersonal("notes", mapOf(
+val urgentActive = Note.query(
     "status" to "active",
     "priority" to "high"
-))
+)
+
+// Or with a map
+val filtered = Note.query(mapOf("status" to "active"))
+```
+
+**Local queries** (no network, instant):
+```kotlin
+Note.all()                              // All local notes
+Note.find(id)                           // By ID
+Note.where { it.status == "active" }    // Filter with predicate
+Note.where { it.createdAt > yesterday } // Complex filters
 ```
 
 **REST API:**
@@ -323,13 +334,6 @@ val urgentActive = client.listPersonal("notes", mapOf(
 GET /buckets/mine/notes                          → All notes
 GET /buckets/mine/notes?status=active            → Filtered
 GET /buckets/mine/notes?status=active&priority=5 → Multiple filters
-```
-
-For complex queries, pull all and filter locally:
-```kotlin
-val notes = Note.all()
-val recent = notes.filter { it.createdAt > yesterday }
-val tagged = notes.filter { "important" in it.tags }
 ```
 
 ## Offline-First Architecture

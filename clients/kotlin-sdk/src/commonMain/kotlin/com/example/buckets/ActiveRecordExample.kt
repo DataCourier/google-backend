@@ -13,13 +13,20 @@ class Note(
     var title: String = "",
     var content: String = "",
     var isPinned: Boolean = false,
-    var tags: List<String> = emptyList()
+    var tags: List<String> = emptyList(),
+    var status: String = "active"
 ) : PersonalActiveRecord() {
 
     companion object {
+        // Local queries
         fun find(id: String): Note? = ActiveRecord.find(id)
         fun all(): List<Note> = ActiveRecord.all()
         fun where(predicate: (Note) -> Boolean): List<Note> = ActiveRecord.where(predicate)
+
+        // Remote queries (fetch from backend)
+        suspend fun query(vararg filters: Pair<String, String>) = ActiveRecord.query<Note>(*filters)
+        suspend fun query(filters: Map<String, String>) = ActiveRecord.query<Note>(filters)
+        suspend fun fetchAll() = ActiveRecord.fetchAll<Note>()
     }
 }
 
@@ -27,13 +34,19 @@ class Note(
 class Task(
     var title: String = "",
     var completed: Boolean = false,
-    var priority: Int = 0
+    var priority: Int = 0,
+    var status: String = "pending"
 ) : PersonalActiveRecord() {
 
     companion object {
+        // Local
         fun find(id: String): Task? = ActiveRecord.find(id)
         fun all(): List<Task> = ActiveRecord.all()
         fun where(predicate: (Task) -> Boolean): List<Task> = ActiveRecord.where(predicate)
+
+        // Remote
+        suspend fun query(vararg filters: Pair<String, String>) = ActiveRecord.query<Task>(*filters)
+        suspend fun fetchAll() = ActiveRecord.fetchAll<Task>()
     }
 }
 
@@ -49,8 +62,12 @@ class Project(
 ) : OrgActiveRecord() {
 
     companion object {
+        // Local
         fun find(id: String): Project? = ActiveRecord.find(id)
         fun all(): List<Project> = ActiveRecord.all()
+
+        // Remote (org buckets use different endpoint)
+        // TODO: Add org query support
     }
 }
 

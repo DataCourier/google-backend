@@ -141,10 +141,57 @@ abstract class ActiveRecord {
         }
 
         /**
-         * Filter records.
+         * Filter records locally.
          */
         inline fun <reified T : ActiveRecord> where(predicate: (T) -> Boolean): List<T> {
             return all<T>().filter(predicate)
+        }
+
+        /**
+         * Query records from backend with filters.
+         * Results are saved to local storage.
+         *
+         * ```kotlin
+         * // Fetch active notes from server
+         * val active = Note.query(mapOf("status" to "active"))
+         *
+         * // Shorthand with vararg pairs
+         * val active = Note.query("status" to "active", "priority" to "high")
+         * ```
+         */
+        suspend inline fun <reified T : ActiveRecord> query(filters: Map<String, String> = emptyMap()): Result<List<T>> {
+            val instance = T::class.java.getDeclaredConstructor().newInstance()
+            val bucketName = instance.bucketName
+            val client = BucketContext.client
+
+            return client.listPersonal(bucketName, filters).map { jsonList ->
+                jsonList.map { json ->
+                    val record = fromJson<T>(json)
+                    record.syncState = SyncState.SYNCED
+                    // Save to local storage
+                    BucketContext.storage.save(bucketName, record.id, record.toJson())
+                    record
+                }
+            }
+        }
+
+        /**
+         * Query with vararg pairs for convenience.
+         *
+         * ```kotlin
+         * Note.query("status" to "active", "priority" to "high")
+         * ```
+         */
+        suspend inline fun <reified T : ActiveRecord> query(vararg filters: Pair<String, String>): Result<List<T>> {
+            return query(filters.toMap())
+        }
+
+        /**
+         * Fetch all records from backend (no filters).
+         * Shorthand for query(emptyMap()).
+         */
+        suspend inline fun <reified T : ActiveRecord> fetchAll(): Result<List<T>> {
+            return query(emptyMap())
         }
 
         /**
