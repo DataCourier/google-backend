@@ -300,6 +300,38 @@ class Article : PersonalActiveRecord() {
 }
 ```
 
+## Query Filters
+
+Filter data on the backend with equality queries:
+
+```kotlin
+// Get all notes
+val all = client.listPersonal("notes")
+
+// Filter by single field
+val active = client.listPersonal("notes", mapOf("status" to "active"))
+
+// Filter by multiple fields (AND)
+val urgentActive = client.listPersonal("notes", mapOf(
+    "status" to "active",
+    "priority" to "high"
+))
+```
+
+**REST API:**
+```
+GET /buckets/mine/notes                          → All notes
+GET /buckets/mine/notes?status=active            → Filtered
+GET /buckets/mine/notes?status=active&priority=5 → Multiple filters
+```
+
+For complex queries, pull all and filter locally:
+```kotlin
+val notes = Note.all()
+val recent = notes.filter { it.createdAt > yesterday }
+val tagged = notes.filter { "important" in it.tags }
+```
+
 ## Offline-First Architecture
 
 The SDK is designed for offline-first mobile apps:
