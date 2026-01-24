@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
 	"google.golang.org/api/iterator"
 
+	"github.com/yourusername/my-app-backend/services/game-service/auth"
 	"github.com/yourusername/my-app-backend/services/game-service/buckets"
 	"github.com/yourusername/my-app-backend/services/game-service/users"
 )
@@ -1254,4 +1256,218 @@ func TestRemoveFriend(t *testing.T) {
 	if profileResp.StatusCode != 403 {
 		t.Errorf("Expected 403 after unfriend, got %d", profileResp.StatusCode)
 	}
+}
+
+// =========================================================================
+// MAGIC LINK AUTH TESTS
+// =========================================================================
+
+func cleanupMagicLinks(ctx context.Context, client *firestore.Client) {
+	for _, coll := range []string{"magic-links", "sessions"} {
+		iter := client.Collection(coll).Documents(ctx)
+		batch := client.Batch()
+		for {
+			doc, err := iter.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				continue
+			}
+			batch.Delete(doc.Ref)
+		}
+		batch.Commit(ctx)
+	}
+}
+
+func setupTestRouterWithAuth(client *firestore.Client) http.Handler {
+	r := chi.NewRouter()
+
+	// Register auth routes
+	magicService := auth.RegisterRoutes(r, client, "http://test.local")
+
+	// Combined middleware (local + session)
+	authMiddleware := auth.Middleware(auth.AuthConfig{
+		Mode:         "local",
+		MagicService: magicService,
+	})
+
+	// Register other routes
+	configs := []buckets.BucketConfig{
+		{Name: "test-data", Type: buckets.PersonalBucket},
+	}
+	buckets.RegisterBucketRoutes(r, client, configs, authMiddleware)
+	buckets.RegisterOpenBucketRoutes(r, client, authMiddleware)
+	users.RegisterRoutes(r, client, authMiddleware)
+
+	return r
+}
+
+func TestMagicLinkFlow(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupUsers(ctx, client)
+	defer cleanupMagicLinks(ctx, client)
+
+	server := httptest.NewServer(setupTestRouterWithAuth(client))
+	defer server.Close()
+
+	// Request magic link
+	resp := doRequestWithHeader(server, "POST", "/auth/magic-link",
+		map[string]interface{}{"email": "alice@example.com"},
+		"", map[string]string{"X-Dev-Mode": "true"})
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d: %v", resp.StatusCode, resp.Body)
+	}
+
+	// In dev mode, magic_url is returned
+	magicURL, ok := resp.Body["magic_url"].(string)
+	if !ok {
+		t.Fatal("Expected magic_url in dev mode")
+	}
+
+	// Extract token from URL
+	parts := strings.Split(magicURL, "token=")
+	if len(parts) != 2 {
+		t.Fatalf("Invalid magic URL: %s", magicURL)
+	}
+	magicToken := parts[1]
+
+	// Verify magic link
+	verifyResp := doRequest(server, "GET", "/auth/verify?token="+magicToken, nil, "")
+	if verifyResp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d: %v", verifyResp.StatusCode, verifyResp.Body)
+	}
+
+	// Get session token
+	sessionToken, ok := verifyResp.Body["token"].(string)
+	if !ok {
+		t.Fatal("Expected token in response")
+	}
+
+	// Use session token to access protected endpoint
+	meResp := doRequest(server, "GET", "/users/me", nil, sessionToken)
+	if meResp.StatusCode != 200 {
+		t.Errorf("Expected 200 with session token, got %d", meResp.StatusCode)
+	}
+
+	// Verify user was created with correct email
+	userData := meResp.Body["data"].(map[string]interface{})
+	if userData["email"] != "alice@example.com" {
+		t.Errorf("Expected email alice@example.com, got %v", userData["email"])
+	}
+}
+
+func TestMagicLinkExpired(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupMagicLinks(ctx, client)
+
+	server := httptest.NewServer(setupTestRouterWithAuth(client))
+	defer server.Close()
+
+	// Try to verify with invalid token
+	resp := doRequest(server, "GET", "/auth/verify?token=invalidtoken123", nil, "")
+	if resp.StatusCode != 401 {
+		t.Errorf("Expected 401 for invalid token, got %d", resp.StatusCode)
+	}
+}
+
+func TestMagicLinkUsedOnce(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupUsers(ctx, client)
+	defer cleanupMagicLinks(ctx, client)
+
+	server := httptest.NewServer(setupTestRouterWithAuth(client))
+	defer server.Close()
+
+	// Request magic link
+	resp := doRequestWithHeader(server, "POST", "/auth/magic-link",
+		map[string]interface{}{"email": "bob@example.com"},
+		"", map[string]string{"X-Dev-Mode": "true"})
+
+	magicURL := resp.Body["magic_url"].(string)
+	magicToken := strings.Split(magicURL, "token=")[1]
+
+	// Use it once
+	verifyResp := doRequest(server, "GET", "/auth/verify?token="+magicToken, nil, "")
+	if verifyResp.StatusCode != 200 {
+		t.Fatalf("First use should succeed: %d", verifyResp.StatusCode)
+	}
+
+	// Try to use again
+	verifyResp2 := doRequest(server, "GET", "/auth/verify?token="+magicToken, nil, "")
+	if verifyResp2.StatusCode != 401 {
+		t.Errorf("Second use should fail: expected 401, got %d", verifyResp2.StatusCode)
+	}
+}
+
+func TestLogout(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupUsers(ctx, client)
+	defer cleanupMagicLinks(ctx, client)
+
+	server := httptest.NewServer(setupTestRouterWithAuth(client))
+	defer server.Close()
+
+	// Login
+	resp := doRequestWithHeader(server, "POST", "/auth/magic-link",
+		map[string]interface{}{"email": "carol@example.com"},
+		"", map[string]string{"X-Dev-Mode": "true"})
+	magicToken := strings.Split(resp.Body["magic_url"].(string), "token=")[1]
+	verifyResp := doRequest(server, "GET", "/auth/verify?token="+magicToken, nil, "")
+	sessionToken := verifyResp.Body["token"].(string)
+
+	// Session works
+	meResp := doRequest(server, "GET", "/users/me", nil, sessionToken)
+	if meResp.StatusCode != 200 {
+		t.Errorf("Session should work: %d", meResp.StatusCode)
+	}
+
+	// Logout (needs Bearer prefix)
+	logoutResp := doRequest(server, "POST", "/auth/logout", nil, "Bearer "+sessionToken)
+	if logoutResp.StatusCode != 200 {
+		t.Errorf("Logout should succeed: %d", logoutResp.StatusCode)
+	}
+
+	// Session no longer works
+	meResp2 := doRequest(server, "GET", "/users/me", nil, sessionToken)
+	if meResp2.StatusCode != 401 {
+		t.Errorf("Session should be invalid after logout: expected 401, got %d", meResp2.StatusCode)
+	}
+}
+
+// Helper for requests with custom headers
+func doRequestWithHeader(server *httptest.Server, method, path string, data map[string]interface{}, token string, headers map[string]string) testResponse {
+	var body *bytes.Buffer
+	if data != nil {
+		jsonData, _ := json.Marshal(data)
+		body = bytes.NewBuffer(jsonData)
+	} else {
+		body = bytes.NewBuffer(nil)
+	}
+
+	req, _ := http.NewRequest(method, server.URL+path, body)
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", token)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	return testResponse{StatusCode: resp.StatusCode, Body: result}
 }

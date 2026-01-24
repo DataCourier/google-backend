@@ -73,13 +73,19 @@ See LOCAL-DEVELOPMENT.md for details.
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Auth middleware - local mode for dev, firebase for prod
-	authMode := "local"
-	if os.Getenv("ENV") == "production" {
-		authMode = "firebase"
+	// Auth routes (magic link)
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
 	}
-	authMiddleware := auth.Middleware(auth.AuthConfig{Mode: authMode})
-	log.Printf("✓ Auth mode: %s", authMode)
+	magicService := auth.RegisterRoutes(r, firestoreClient, baseURL)
+	log.Printf("✓ Magic link auth enabled (base: %s)", baseURL)
+
+	// Auth middleware - supports both local:xxx tokens and session tokens
+	authMiddleware := auth.Middleware(auth.AuthConfig{
+		Mode:         "local", // Accepts both local and session tokens
+		MagicService: magicService,
+	})
 
 	// User routes
 	users.RegisterRoutes(r, firestoreClient, authMiddleware)
