@@ -115,9 +115,12 @@ class BucketClient(
         checkResponse(response)
     }
 
-    suspend fun listPersonal(bucket: String): Result<List<JsonObject>> = runCatching {
+    suspend fun listPersonal(bucket: String, filters: Map<String, String> = emptyMap()): Result<List<JsonObject>> = runCatching {
         val response = httpClient.get("$baseUrl/buckets/mine/$bucket") {
             authToken?.let { header("Authorization", it) }
+            filters.forEach { (key, value) ->
+                parameter(key, value)
+            }
         }
         checkResponse(response)
         response.body<JsonObject>()["data"]?.jsonArray?.map { it.jsonObject } ?: emptyList()

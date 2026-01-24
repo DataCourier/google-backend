@@ -461,6 +461,111 @@ func TestListPersonalBucket(t *testing.T) {
 	}
 }
 
+func TestListWithQueryFilters(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	// Clean up query-test collection before testing
+	ctx := context.Background()
+	iter := client.Collection("personal-query-test").Documents(ctx)
+	batch := client.Batch()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		batch.Delete(doc.Ref)
+	}
+	batch.Commit(ctx)
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create items with different statuses and priorities
+	doRequest(server, "POST", "/buckets/mine/query-test",
+		map[string]interface{}{"title": "Task 1", "status": "active", "priority": "high"},
+		"user-a-token")
+	doRequest(server, "POST", "/buckets/mine/query-test",
+		map[string]interface{}{"title": "Task 2", "status": "active", "priority": "low"},
+		"user-a-token")
+	doRequest(server, "POST", "/buckets/mine/query-test",
+		map[string]interface{}{"title": "Task 3", "status": "completed", "priority": "high"},
+		"user-a-token")
+	doRequest(server, "POST", "/buckets/mine/query-test",
+		map[string]interface{}{"title": "Task 4", "status": "completed", "priority": "low"},
+		"user-a-token")
+
+	// Query with no filters - should get all 4
+	allResp := doRequest(server, "GET", "/buckets/mine/query-test", nil, "user-a-token")
+	allItems := allResp.Body["data"].([]interface{})
+	if len(allItems) != 4 {
+		t.Errorf("Expected 4 items with no filter, got %d", len(allItems))
+	}
+
+	// Query by status=active - should get 2
+	activeResp := doRequest(server, "GET", "/buckets/mine/query-test?status=active", nil, "user-a-token")
+	activeItems := activeResp.Body["data"].([]interface{})
+	if len(activeItems) != 2 {
+		t.Errorf("Expected 2 active items, got %d", len(activeItems))
+	}
+	for _, item := range activeItems {
+		itemMap := item.(map[string]interface{})
+		if itemMap["status"] != "active" {
+			t.Errorf("Expected status=active, got %v", itemMap["status"])
+		}
+	}
+
+	// Query by priority=high - should get 2
+	highResp := doRequest(server, "GET", "/buckets/mine/query-test?priority=high", nil, "user-a-token")
+	highItems := highResp.Body["data"].([]interface{})
+	if len(highItems) != 2 {
+		t.Errorf("Expected 2 high priority items, got %d", len(highItems))
+	}
+
+	// Query by status=active AND priority=high - should get 1
+	activeHighResp := doRequest(server, "GET", "/buckets/mine/query-test?status=active&priority=high", nil, "user-a-token")
+	activeHighItems := activeHighResp.Body["data"].([]interface{})
+	if len(activeHighItems) != 1 {
+		t.Errorf("Expected 1 active+high item, got %d", len(activeHighItems))
+	}
+	if len(activeHighItems) > 0 {
+		itemMap := activeHighItems[0].(map[string]interface{})
+		if itemMap["title"] != "Task 1" {
+			t.Errorf("Expected Task 1, got %v", itemMap["title"])
+		}
+	}
+
+	// Query by status=pending - should get 0
+	pendingResp := doRequest(server, "GET", "/buckets/mine/query-test?status=pending", nil, "user-a-token")
+	pendingItems := getDataArray(pendingResp.Body)
+	if len(pendingItems) != 0 {
+		t.Errorf("Expected 0 pending items, got %d", len(pendingItems))
+	}
+
+	// User B cannot see User A's items even with filters
+	userBResp := doRequest(server, "GET", "/buckets/mine/query-test?status=active", nil, "user-b-token")
+	userBItems := getDataArray(userBResp.Body)
+	if len(userBItems) != 0 {
+		t.Errorf("User B should not see User A's items, got %d", len(userBItems))
+	}
+}
+
+// Helper to safely get data array from response (handles nil)
+func getDataArray(body map[string]interface{}) []interface{} {
+	data := body["data"]
+	if data == nil {
+		return []interface{}{}
+	}
+	arr, ok := data.([]interface{})
+	if !ok {
+		return []interface{}{}
+	}
+	return arr
+}
+
 // Sharing tests
 
 func TestShareItem(t *testing.T) {

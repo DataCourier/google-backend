@@ -132,7 +132,15 @@ func registerPersonalBucketRoutes(r chi.Router, bucketName string, bucket *Perso
 
 func listHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		items, err := bucket.List(r.Context(), bucketName)
+		// Extract query filters from URL params
+		filters := make(map[string]interface{})
+		for key, values := range r.URL.Query() {
+			if len(values) > 0 {
+				filters[key] = values[0]
+			}
+		}
+
+		items, err := bucket.List(r.Context(), bucketName, filters)
 		if err != nil {
 			if strings.Contains(err.Error(), "unauthorized") {
 				respondJSON(w, http.StatusUnauthorized, map[string]string{

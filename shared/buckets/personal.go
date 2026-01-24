@@ -121,8 +121,10 @@ func (b *PersonalBucketImpl) Delete(ctx context.Context, bucketName string, id s
 	return err
 }
 
-// List returns all items in a personal bucket for the current user.
-func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string) ([]map[string]interface{}, error) {
+// List returns items in a personal bucket for the current user.
+// Supports optional filters for equality queries.
+// Example: filters = {"status": "active", "priority": "5"}
+func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filters ...map[string]interface{}) ([]map[string]interface{}, error) {
 	userID, ok := ctx.Value("user_id").(string)
 	if !ok || userID == "" {
 		return nil, errors.New("unauthorized")
@@ -130,8 +132,21 @@ func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string) ([]map
 
 	collection := fmt.Sprintf("personal-%s", bucketName)
 
-	// Query only items belonging to this user
-	iter := b.client.Collection(collection).Where("user_id", "==", userID).Documents(ctx)
+	// Start with user_id filter (always required)
+	query := b.client.Collection(collection).Where("user_id", "==", userID)
+
+	// Apply additional filters if provided
+	if len(filters) > 0 && filters[0] != nil {
+		for key, value := range filters[0] {
+			// Skip internal fields
+			if key == "user_id" {
+				continue
+			}
+			query = query.Where(key, "==", value)
+		}
+	}
+
+	iter := query.Documents(ctx)
 	defer iter.Stop()
 
 	var results []map[string]interface{}
