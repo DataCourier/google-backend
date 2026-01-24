@@ -57,6 +57,11 @@
             background: white;
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border: 4px solid transparent;
+            transition: border-color 0.3s;
+        }
+        .board.your-turn {
+            border-color: #27ae60;
         }
         .cell {
             width: 120px;
@@ -71,11 +76,28 @@
             justify-content: center;
             border-radius: 8px;
             transition: all 0.2s;
+            position: relative;
         }
         .cell:hover:not(.taken) {
             background: #d5dbdb;
             transform: scale(1.05);
             border-color: #3498db;
+        }
+        .cell:not(.taken):hover:after {
+            content: attr(data-player);
+            opacity: 0.3;
+            font-size: 60px;
+            font-weight: bold;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .cell:not(.taken)[data-player="X"]:hover:after {
+            color: #e74c3c;
+        }
+        .cell:not(.taken)[data-player="O"]:hover:after {
+            color: #3498db;
         }
         .cell.taken { cursor: not-allowed; background: #f8f9fa; }
         .cell.x { color: #e74c3c; }
@@ -98,9 +120,10 @@
         </div>
         {{end}}
 
-        <div class="board">
+        <div class="board {{if and (eq .CurrentTurn .Player) (eq .Winner "")}}your-turn{{end}}">
             {{range $i, $cell := .Board}}
             <div class="cell {{if ne $cell ""}}taken{{end}} {{if eq $cell "X"}}x{{else if eq $cell "O"}}o{{end}}"
+                 data-player="{{$.Player}}"
                  onclick="makeMove({{$i}})">
                 {{$cell}}
             </div>

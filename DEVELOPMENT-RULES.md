@@ -32,15 +32,15 @@ Edit code → Deploy to Cloud Run (2 min) → Test → It's broken → Fix → D
 ### How to Test Locally
 
 ```bash
-# Terminal 1: Run server
-cd services/game-service
-export PATH=/home/michal/go/bin:$PATH
-export GCP_PROJECT=michal-playground-2026
-go run .
+# Terminal 1: Start emulator (keep running)
+make emulator
 
-# Terminal 2: Test
+# Terminal 2: Run server
+make dev-game
+
+# Terminal 3: Test
 curl http://localhost:8080/
-curl "http://localhost:8080/games/test?token=abc"
+curl -X POST http://localhost:8080/games/create
 ```
 
 ### Checklist Before Deploy
@@ -159,6 +159,46 @@ But also:
 - Don't deploy drunk
 - Test locally first (see Rule #1)
 - Document your brilliant ideas before you forget them
+
+---
+
+## RULE #8: Template Hot Reload = Instant Feedback
+
+### The Problem (Before)
+
+```
+Edit CSS → Kill server → Wait 2s → Restart → Test → Repeat
+```
+
+### The Solution (Now)
+
+```
+Edit CSS/HTML → Refresh browser (instant!) → Done
+```
+
+### How It Works
+
+Templates reload on every request in dev mode:
+
+```go
+func reloadTemplatesInDev() {
+    if os.Getenv("ENV") != "production" {
+        templates = template.Must(template.ParseGlob("views/*.html"))
+    }
+}
+```
+
+Called at the start of every handler that uses templates.
+
+### When You STILL Need to Restart
+
+- Go code changes (handlers, models, logic)
+- Dependency changes (go.mod)
+
+### When You DON'T Need to Restart
+
+- Template changes (HTML, CSS in `<style>`, JavaScript in `<script>`)
+- Just refresh your browser!
 
 ---
 

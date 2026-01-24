@@ -23,6 +23,25 @@ var (
 func main() {
 	ctx := context.Background()
 
+	// Require Firestore emulator in dev to avoid accidental prod writes
+	if os.Getenv("ENV") != "production" {
+		if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+			log.Fatal(`
+🚨 ERROR: Firestore emulator not detected!
+
+In local development, you MUST use the Firestore emulator to avoid writing to production.
+
+To fix:
+  1. Terminal 1: gcloud emulators firestore start
+  2. Terminal 2: export FIRESTORE_EMULATOR_HOST=localhost:8080
+  3. Then run: go run .
+
+See LOCAL-DEVELOPMENT.md for details.
+`)
+		}
+		log.Printf("✓ Using Firestore emulator at %s", os.Getenv("FIRESTORE_EMULATOR_HOST"))
+	}
+
 	// Initialize Firestore (uses GOOGLE_APPLICATION_CREDENTIALS env var)
 	projectID := os.Getenv("GCP_PROJECT")
 	if projectID == "" {
@@ -70,8 +89,16 @@ func main() {
 	}
 }
 
+// reloadTemplatesInDev reloads templates on every request in dev mode
+func reloadTemplatesInDev() {
+	if os.Getenv("ENV") != "production" {
+		templates = template.Must(template.ParseGlob("views/*.html"))
+	}
+}
+
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("→ homeHandler: %s %s", r.Method, r.URL.Path)
+	reloadTemplatesInDev()
 
 	if err := templates.ExecuteTemplate(w, "home.html", nil); err != nil {
 		log.Printf("✗ homeHandler: template error: %v", err)
@@ -102,6 +129,7 @@ func createGameHandler(w http.ResponseWriter, r *http.Request) {
 func viewGameHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "gameId")
 	log.Printf("→ viewGameHandler: %s %s (gameID=%s)", r.Method, r.URL.Path, gameID)
+	reloadTemplatesInDev()
 
 	ctx := r.Context()
 	token := r.URL.Query().Get("token")

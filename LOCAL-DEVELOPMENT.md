@@ -6,28 +6,92 @@ Test changes locally before deploying to Cloud Run (way faster than 2-minute dep
 
 ## Quick Start
 
+**Using Makefile (easiest):**
+
 ```bash
-# 1. Navigate to service
-cd services/game-service
+# Terminal 1: Start Firestore Emulator
+make emulator
 
-# 2. Set environment variables
-export PATH=$HOME/go/bin:$PATH
-export GCP_PROJECT=michal-playground-2026
+# Terminal 2: Run game-service
+make dev-game
 
-# 3. Run the service
-go run main.go
-
-# 4. Test in another terminal
+# Terminal 3: Test
 curl http://localhost:8080/
 ```
 
-Server starts in ~2 seconds. Edit code, restart (Ctrl+C, re-run), test. Way faster than Cloud Run!
+**Manual (if you prefer):**
+
+```bash
+# Terminal 1: Start Firestore Emulator
+gcloud emulators firestore start
+
+# Terminal 2: Run the service
+cd services/game-service
+export PATH=$HOME/go/bin:$PATH
+export GCP_PROJECT=michal-playground-2026
+export FIRESTORE_EMULATOR_HOST=localhost:8080
+go run .
+
+# Terminal 3: Test
+curl http://localhost:8080/
+```
+
+**Why use the emulator?**
+- ⚡ Instant startup (~100ms vs 2s network roundtrip)
+- 🔒 Isolated test data (won't pollute production)
+- ✈️ Works offline
+- 🚨 Server will error if emulator not running (prevents accidental prod writes)
+
+**Template Hot Reload:**
+- Edit HTML/CSS in `views/*.html` → Just refresh browser (instant!)
+- No server restart needed for template changes
+- Only restart when changing Go code
+
+**⚠️ What if I forget to start the emulator?**
+
+The server will fail immediately with a helpful error:
+
+```
+🚨 ERROR: Firestore emulator not detected!
+
+In local development, you MUST use the Firestore emulator to avoid writing to production.
+
+To fix:
+  1. Terminal 1: gcloud emulators firestore start
+  2. Terminal 2: export FIRESTORE_EMULATOR_HOST=localhost:8080
+  3. Then run: go run .
+```
+
+This prevents you from accidentally writing test data to production Firestore!
 
 ---
 
 ## Prerequisites
 
-### 1. Install Go
+### 1. Install Firestore Emulator
+
+```bash
+# Install the emulator component
+gcloud components install cloud-firestore-emulator
+
+# Verify it's installed
+gcloud emulators firestore --help
+```
+
+**Start the emulator** (leave this running in a dedicated terminal):
+
+```bash
+gcloud emulators firestore start
+```
+
+You should see:
+```
+[firestore] API endpoint: http://localhost:8080
+```
+
+Keep this terminal open! The emulator needs to stay running.
+
+### 2. Install Go
 
 ```bash
 # Check if Go is installed
