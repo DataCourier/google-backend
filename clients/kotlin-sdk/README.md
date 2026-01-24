@@ -368,6 +368,33 @@ BucketContext.refreshFromBackend("notes") { json ->
 }
 ```
 
+## Batch Sync
+
+For efficient syncing of multiple offline records:
+
+```kotlin
+// Sync all dirty records to backend (batched, max 50 per request)
+val report = BucketContext.syncAll()
+
+report.onSuccess {
+    println("Created: ${it.created}, Updated: ${it.updated}, Deleted: ${it.deleted}")
+    if (it.errors > 0) {
+        println("Errors: ${it.errors}")
+    }
+}
+
+// Check if all synced
+if (report.getOrNull()?.success == true) {
+    println("Everything synced!")
+}
+```
+
+The SDK automatically:
+- Groups records by bucket
+- Splits into batches of 50 records max
+- Reports status for each record (created/updated/error)
+- Handles deletes separately
+
 ## Local Development
 
 Use `local:` tokens for development without magic link:

@@ -566,6 +566,232 @@ func getDataArray(body map[string]interface{}) []interface{} {
 	return arr
 }
 
+// doRequestArray sends a request with a JSON array body
+func doRequestArray(server *httptest.Server, method, path string, data []map[string]interface{}, token string) testResponse {
+	jsonData, _ := json.Marshal(data)
+	body := bytes.NewBuffer(jsonData)
+
+	req, _ := http.NewRequest(method, server.URL+path, body)
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", token)
+	}
+
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	return testResponse{StatusCode: resp.StatusCode, Body: result}
+}
+
+func TestBatchSync(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	// Clean up batch-test collection before testing
+	ctx := context.Background()
+	iter := client.Collection("personal-batch-test").Documents(ctx)
+	batch := client.Batch()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		batch.Delete(doc.Ref)
+	}
+	batch.Commit(ctx)
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Batch create 3 new items (no IDs - server generates)
+	records := []map[string]interface{}{
+		{"title": "Note 1", "status": "active"},
+		{"title": "Note 2", "status": "pending"},
+		{"title": "Note 3", "status": "active"},
+	}
+
+	resp := doRequestArray(server, "POST", "/buckets/mine/batch-test/batch", records, "user-a-token")
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d: %v", resp.StatusCode, resp.Body)
+	}
+
+	results := resp.Body["data"].([]interface{})
+	if len(results) != 3 {
+		t.Fatalf("Expected 3 results, got %d", len(results))
+	}
+
+	// All should be "created"
+	for i, r := range results {
+		result := r.(map[string]interface{})
+		if result["status"] != "created" {
+			t.Errorf("Result %d: expected status 'created', got %v", i, result["status"])
+		}
+		if result["id"] == nil || result["id"] == "" {
+			t.Errorf("Result %d: expected id to be set", i)
+		}
+	}
+
+	// Verify items exist in database
+	listResp := doRequest(server, "GET", "/buckets/mine/batch-test", nil, "user-a-token")
+	items := listResp.Body["data"].([]interface{})
+	if len(items) != 3 {
+		t.Errorf("Expected 3 items in list, got %d", len(items))
+	}
+}
+
+func TestBatchSyncWithExistingIDs(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	// Clean up
+	ctx := context.Background()
+	iter := client.Collection("personal-batch-update-test").Documents(ctx)
+	batch := client.Batch()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		batch.Delete(doc.Ref)
+	}
+	batch.Commit(ctx)
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create an item first
+	createResp := doRequest(server, "POST", "/buckets/mine/batch-update-test",
+		map[string]interface{}{"title": "Original", "count": 1},
+		"user-a-token")
+	existingID := createResp.Body["data"].(map[string]interface{})["id"].(string)
+
+	// Batch with mix of new and existing
+	records := []map[string]interface{}{
+		{"id": existingID, "title": "Updated", "count": 99}, // Update existing
+		{"title": "New Item", "count": 1},                   // Create new
+	}
+
+	resp := doRequestArray(server, "POST", "/buckets/mine/batch-update-test/batch", records, "user-a-token")
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d: %v", resp.StatusCode, resp.Body)
+	}
+
+	results := resp.Body["data"].([]interface{})
+
+	// First should be "updated"
+	first := results[0].(map[string]interface{})
+	if first["status"] != "updated" {
+		t.Errorf("Expected 'updated' for existing item, got %v", first["status"])
+	}
+	if first["id"] != existingID {
+		t.Errorf("Expected id %s, got %v", existingID, first["id"])
+	}
+
+	// Second should be "created"
+	second := results[1].(map[string]interface{})
+	if second["status"] != "created" {
+		t.Errorf("Expected 'created' for new item, got %v", second["status"])
+	}
+
+	// Verify update was applied
+	getResp := doRequest(server, "GET", "/buckets/mine/batch-update-test/"+existingID, nil, "user-a-token")
+	data := getResp.Body["data"].(map[string]interface{})
+	if data["title"] != "Updated" {
+		t.Errorf("Expected title 'Updated', got %v", data["title"])
+	}
+	if data["count"].(float64) != 99 {
+		t.Errorf("Expected count 99, got %v", data["count"])
+	}
+}
+
+func TestBatchSyncUserIsolation(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	// Clean up
+	ctx := context.Background()
+	iter := client.Collection("personal-batch-iso-test").Documents(ctx)
+	batch := client.Batch()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		batch.Delete(doc.Ref)
+	}
+	batch.Commit(ctx)
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// User A creates an item
+	createResp := doRequest(server, "POST", "/buckets/mine/batch-iso-test",
+		map[string]interface{}{"title": "User A's Item"},
+		"user-a-token")
+	userAItemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
+
+	// User B tries to update User A's item via batch
+	records := []map[string]interface{}{
+		{"id": userAItemID, "title": "Hacked by B"},
+	}
+
+	resp := doRequestArray(server, "POST", "/buckets/mine/batch-iso-test/batch", records, "user-b-token")
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	results := resp.Body["data"].([]interface{})
+	result := results[0].(map[string]interface{})
+
+	// Should be "error" with "forbidden"
+	if result["status"] != "error" {
+		t.Errorf("Expected status 'error', got %v", result["status"])
+	}
+	if result["error"] != "forbidden" {
+		t.Errorf("Expected error 'forbidden', got %v", result["error"])
+	}
+
+	// Verify original item unchanged
+	getResp := doRequest(server, "GET", "/buckets/mine/batch-iso-test/"+userAItemID, nil, "user-a-token")
+	data := getResp.Body["data"].(map[string]interface{})
+	if data["title"] != "User A's Item" {
+		t.Errorf("Item should be unchanged, got title %v", data["title"])
+	}
+}
+
+func TestBatchSyncNoAuth(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	records := []map[string]interface{}{
+		{"title": "Test"},
+	}
+
+	resp := doRequestArray(server, "POST", "/buckets/mine/test/batch", records, "")
+
+	if resp.StatusCode != 401 {
+		t.Errorf("Expected 401 without auth, got %d", resp.StatusCode)
+	}
+}
+
 // Sharing tests
 
 func TestShareItem(t *testing.T) {

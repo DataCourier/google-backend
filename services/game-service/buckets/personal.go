@@ -121,6 +121,65 @@ func (b *PersonalBucketImpl) Delete(ctx context.Context, bucketName string, id s
 	return err
 }
 
+// BatchResult represents the result of a single record in a batch operation.
+type BatchResult struct {
+	ID     string `json:"id"`
+	Status string `json:"status"` // "created", "updated", "error"
+	Error  string `json:"error,omitempty"`
+}
+
+// Batch creates or updates multiple records in a single operation.
+// Records with existing IDs are updated, new IDs are created.
+func (b *PersonalBucketImpl) Batch(ctx context.Context, bucketName string, records []map[string]interface{}) ([]BatchResult, error) {
+	userID, ok := ctx.Value("user_id").(string)
+	if !ok || userID == "" {
+		return nil, errors.New("unauthorized")
+	}
+
+	collection := fmt.Sprintf("personal-%s", bucketName)
+	results := make([]BatchResult, len(records))
+
+	for i, record := range records {
+		id, hasID := record["id"].(string)
+		if !hasID || id == "" {
+			id = uuid.New().String()
+			record["id"] = id
+		}
+
+		// Check if record exists
+		doc, err := b.client.Collection(collection).Doc(id).Get(ctx)
+		exists := err == nil && doc.Exists()
+
+		if exists {
+			// Verify ownership for update
+			existingData := doc.Data()
+			if existingData["user_id"] != userID {
+				results[i] = BatchResult{ID: id, Status: "error", Error: "forbidden"}
+				continue
+			}
+		}
+
+		// Set metadata
+		record["user_id"] = userID
+		record["updated_at"] = time.Now()
+		if !exists {
+			record["created_at"] = time.Now()
+		}
+
+		// Save
+		_, err = b.client.Collection(collection).Doc(id).Set(ctx, record)
+		if err != nil {
+			results[i] = BatchResult{ID: id, Status: "error", Error: err.Error()}
+		} else if exists {
+			results[i] = BatchResult{ID: id, Status: "updated"}
+		} else {
+			results[i] = BatchResult{ID: id, Status: "created"}
+		}
+	}
+
+	return results, nil
+}
+
 // List returns items in a personal bucket for the current user.
 // Supports optional filters for equality queries.
 // Example: filters = {"status": "active", "priority": "5"}

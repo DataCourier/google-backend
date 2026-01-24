@@ -117,10 +117,100 @@ object BucketContext {
     }
 
     /**
-     * Sync all dirty records.
+     * Sync all dirty records to backend using batch API.
+     * Groups records by bucket and sends in batches of up to 50 records.
      */
-    suspend fun syncAll() {
-        // TODO: Iterate all buckets and sync dirty records
+    suspend fun syncAll(): Result<SyncReport> {
+        val client = _client ?: return Result.failure(IllegalStateException("No client configured"))
+
+        _syncStatus.value = SyncStatus.Syncing
+
+        val report = SyncReport()
+
+        try {
+            // Get all buckets that have data
+            val buckets = storage.getAllBuckets()
+
+            for (bucketName in buckets) {
+                val allRecords = storage.getAll(bucketName)
+
+                // Filter dirty/deleted records
+                val dirtyRecords = allRecords.filter { json ->
+                    val state = json["sync_state"]?.jsonPrimitive?.content
+                    state == SyncState.DIRTY.name || state == SyncState.DELETED.name
+                }
+
+                if (dirtyRecords.isEmpty()) continue
+
+                // Split into batches of 50
+                val batches = dirtyRecords.chunked(MAX_BATCH_SIZE)
+
+                for (batch in batches) {
+                    // Separate deletes from creates/updates
+                    val toDelete = batch.filter {
+                        it["sync_state"]?.jsonPrimitive?.content == SyncState.DELETED.name
+                    }
+                    val toUpsert = batch.filter {
+                        it["sync_state"]?.jsonPrimitive?.content == SyncState.DIRTY.name
+                    }
+
+                    // Handle deletes individually (batch delete not supported yet)
+                    for (deleteJson in toDelete) {
+                        val id = deleteJson["id"]?.jsonPrimitive?.content ?: continue
+                        client.deletePersonal(bucketName, id)
+                            .onSuccess {
+                                storage.delete(bucketName, id)
+                                report.deleted++
+                            }
+                            .onFailure {
+                                report.errors++
+                            }
+                    }
+
+                    // Batch upsert
+                    if (toUpsert.isNotEmpty()) {
+                        client.batchPersonal(bucketName, toUpsert)
+                            .onSuccess { results ->
+                                for (result in results) {
+                                    when (result.status) {
+                                        "created" -> {
+                                            report.created++
+                                            markSynced(bucketName, result.id)
+                                        }
+                                        "updated" -> {
+                                            report.updated++
+                                            markSynced(bucketName, result.id)
+                                        }
+                                        "error" -> report.errors++
+                                    }
+                                }
+                            }
+                            .onFailure {
+                                report.errors += toUpsert.size
+                            }
+                    }
+                }
+            }
+
+            _syncStatus.value = if (report.errors == 0) SyncStatus.Synced
+                               else SyncStatus.Error("${report.errors} records failed to sync")
+
+            return Result.success(report)
+        } catch (e: Exception) {
+            _syncStatus.value = SyncStatus.Error(e.message ?: "Sync failed")
+            return Result.failure(e)
+        }
+    }
+
+    private fun markSynced(bucketName: String, id: String) {
+        val json = storage.get(bucketName, id) ?: return
+        val mutableMap = json.toMutableMap()
+        mutableMap["sync_state"] = kotlinx.serialization.json.JsonPrimitive(SyncState.SYNCED.name)
+        storage.save(bucketName, id, JsonObject(mutableMap))
+    }
+
+    companion object {
+        const val MAX_BATCH_SIZE = 50
     }
 
     /**
@@ -195,4 +285,17 @@ sealed class SyncStatus {
     object Syncing : SyncStatus()
     object Synced : SyncStatus()
     data class Error(val message: String) : SyncStatus()
+}
+
+/**
+ * Report from a syncAll() operation.
+ */
+data class SyncReport(
+    var created: Int = 0,
+    var updated: Int = 0,
+    var deleted: Int = 0,
+    var errors: Int = 0
+) {
+    val total: Int get() = created + updated + deleted
+    val success: Boolean get() = errors == 0
 }

@@ -42,6 +42,7 @@ func RegisterOpenBucketRoutes(r chi.Router, client *firestore.Client, authMiddle
 
 		r.Get("/{bucket}", openListHandler(bucket))
 		r.Post("/{bucket}", openCreateHandler(bucket))
+		r.Post("/{bucket}/batch", openBatchHandler(bucket))
 		r.Get("/{bucket}/{id}", openGetHandler(bucket))
 		r.Put("/{bucket}/{id}", openUpdateHandler(bucket))
 		r.Delete("/{bucket}/{id}", openDeleteHandler(bucket))
@@ -332,6 +333,57 @@ func openDeleteHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 		bucketName := chi.URLParam(r, "bucket")
 		trackBucket(bucketName)
 		deleteHandler(bucket, bucketName)(w, r)
+	}
+}
+
+func openBatchHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		bucketName := chi.URLParam(r, "bucket")
+		trackBucket(bucketName)
+		batchHandler(bucket, bucketName)(w, r)
+	}
+}
+
+func batchHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var records []map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&records); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "bad_request",
+				"message": "Invalid JSON array",
+			})
+			return
+		}
+
+		// Limit batch size to prevent abuse
+		if len(records) > 100 {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "bad_request",
+				"message": "Batch size exceeds limit of 100 records",
+			})
+			return
+		}
+
+		results, err := bucket.Batch(r.Context(), bucketName, records)
+		if err != nil {
+			if strings.Contains(err.Error(), "unauthorized") {
+				respondJSON(w, http.StatusUnauthorized, map[string]string{
+					"error":   "unauthorized",
+					"message": "Authentication required",
+				})
+			} else {
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"error":   "internal_error",
+					"message": err.Error(),
+				})
+			}
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"message": "Batch processed",
+			"data":    results,
+		})
 	}
 }
 

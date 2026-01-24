@@ -17,6 +17,9 @@ interface LocalStorage {
     /** Get all records for a bucket */
     fun getAll(bucketName: String): List<JsonObject>
 
+    /** Get all bucket names that have data */
+    fun getAllBuckets(): Set<String>
+
     /** Delete a record */
     fun delete(bucketName: String, id: String)
 
@@ -43,6 +46,10 @@ class InMemoryStorage : LocalStorage {
 
     override fun getAll(bucketName: String): List<JsonObject> {
         return store[bucketName]?.values?.toList() ?: emptyList()
+    }
+
+    override fun getAllBuckets(): Set<String> {
+        return store.keys.toSet()
     }
 
     override fun delete(bucketName: String, id: String) {

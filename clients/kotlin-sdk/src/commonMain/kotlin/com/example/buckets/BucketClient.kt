@@ -126,6 +126,27 @@ class BucketClient(
         response.body<JsonObject>()["data"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
     }
 
+    /**
+     * Batch create/update multiple records in a single request.
+     * Returns a list of results with status for each record.
+     */
+    suspend fun batchPersonal(bucket: String, records: List<JsonObject>): Result<List<BatchResult>> = runCatching {
+        val response = httpClient.post("$baseUrl/buckets/mine/$bucket/batch") {
+            contentType(ContentType.Application.Json)
+            authToken?.let { header("Authorization", it) }
+            setBody(JsonArray(records))
+        }
+        checkResponse(response)
+        response.body<JsonObject>()["data"]?.jsonArray?.map { item ->
+            val obj = item.jsonObject
+            BatchResult(
+                id = obj["id"]?.jsonPrimitive?.content ?: "",
+                status = obj["status"]?.jsonPrimitive?.content ?: "error",
+                error = obj["error"]?.jsonPrimitive?.content
+            )
+        } ?: emptyList()
+    }
+
     // =========================================================================
     // Org bucket endpoints
     // =========================================================================
@@ -196,3 +217,12 @@ data class AuthSession(
 )
 
 class BucketException(val statusCode: Int, message: String) : Exception(message)
+
+/**
+ * Result of a single record in a batch operation.
+ */
+data class BatchResult(
+    val id: String,
+    val status: String,  // "created", "updated", "error"
+    val error: String? = null
+)
