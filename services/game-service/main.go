@@ -12,7 +12,10 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/yourusername/my-app-backend/services/game-service/auth"
+	"github.com/yourusername/my-app-backend/services/game-service/buckets"
 	"github.com/yourusername/my-app-backend/services/game-service/models"
+	"github.com/yourusername/my-app-backend/services/game-service/users"
 )
 
 var (
@@ -70,7 +73,21 @@ See LOCAL-DEVELOPMENT.md for details.
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Specific routes first
+	// Auth middleware - local mode for dev, firebase for prod
+	authMode := "local"
+	if os.Getenv("ENV") == "production" {
+		authMode = "firebase"
+	}
+	authMiddleware := auth.Middleware(auth.AuthConfig{Mode: authMode})
+	log.Printf("✓ Auth mode: %s", authMode)
+
+	// User routes
+	users.RegisterRoutes(r, firestoreClient, authMiddleware)
+
+	// Bucket routes (personal, sharing, org)
+	buckets.RegisterOpenBucketRoutes(r, firestoreClient, authMiddleware)
+
+	// Game routes (existing)
 	r.Post("/games/{gameId}/move", makeMoveHandler)
 	r.Get("/games/{gameId}", viewGameHandler)
 	r.Post("/games/create", createGameHandler)

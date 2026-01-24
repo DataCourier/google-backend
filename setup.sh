@@ -33,11 +33,13 @@ sync_shared_to_service() {
     mkdir -p "$service_dir/auth"
     mkdir -p "$service_dir/middleware"
     mkdir -p "$service_dir/response"
+    mkdir -p "$service_dir/buckets"
 
     # Copy shared code
     cp -r shared/auth/* "$service_dir/auth/" 2>/dev/null || true
     cp -r shared/middleware/* "$service_dir/middleware/" 2>/dev/null || true
     cp -r shared/response/* "$service_dir/response/" 2>/dev/null || true
+    cp -r shared/buckets/* "$service_dir/buckets/" 2>/dev/null || true
 
     echo "   ✅ Shared code synced"
 }

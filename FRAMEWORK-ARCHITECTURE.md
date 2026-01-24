@@ -67,34 +67,345 @@ POST /buckets/personal/elevator-sessions
 // - No permission logic needed in app code
 ```
 
-##### Shared Bucket (for collaboration)
+##### P2P Sharing (via sharings table)
 
 ```
-Documents have permission metadata
-Multiple users can write based on access rules
-Permission checks at document level
+Data stays in owner's personal bucket
+Sharing is a pointer, not a copy
+Owner retains full control
+Revoke = delete the sharing record
 ```
 
-**Use case:** Team documents, multiplayer games, collaborative boards
+**Use case:** Share a note with a friend, collaborative doc between individuals
 
-**Example:**
+**How it works:**
+```
+┌──────────────────┐       ┌──────────────────┐
+│ personal-notes   │       │ sharings         │
+│ (user-a's data)  │◄──────│                  │
+│                  │       │ owner: user-a    │
+│ id: abc123       │       │ shared_with: b   │
+│ title: "Hi"      │       │ item_id: abc123  │
+│                  │       │ access: read     │
+└──────────────────┘       └──────────────────┘
+```
+
+**API:**
+```
+POST /sharing/notes/{id}         # share with someone
+DELETE /sharing/notes/{id}/{user} # unshare
+GET /sharing/with-me             # what's shared with me
+GET /sharing/by-me               # what I've shared
+GET /sharing/notes/{id}          # access shared item
+PUT /sharing/notes/{id}          # update (if write access)
+```
+
+---
+
+##### Org Bucket (for companies/teams)
+
+**Philosophy: The org owns everything. Users are temporary.**
+
+```
+Everything created belongs to the org, not the user
+No cross-org data bleed - hard boundary enforced
+Users come and go, data stays with org
+created_by is metadata, not ownership
+Access via org membership + roles, not individual permissions
+```
+
+**Key Principles:**
+
+1. **Org is the owner**
+   - User creates a doc → org owns it
+   - `created_by: user-a` is just audit metadata
+   - User can't take it with them
+
+2. **Hard org boundary**
+   - Can't share org data outside the org
+   - Can't accidentally leak to personal bucket
+   - Org ID is on every document, enforced at framework level
+
+3. **Users are secondary**
+   - Access = org membership + role
+   - User leaves org → instant loss of access
+   - New hire + role → instant access to relevant data
+
+4. **Roles, not individual permissions**
+   - `admin`, `member`, `viewer`, etc.
+   - Role determines what you can do
+   - No per-document permission management
+
+**Data structure:**
 ```go
-// Create shared document with permissions
-POST /buckets/shared/game-rooms
+// Every org bucket document has:
 {
-  "room_id": "uuid-456",
-  "owner": "user-123",
-  "players": ["user-123", "user-789"],
-  "permissions": {
-    "read": ["user-123", "user-789"],
-    "write": ["user-123", "user-789"]
-  }
+  "id": "doc-123",
+  "org_id": "acme-corp",      // HARD REQUIREMENT - enforced
+  "created_by": "user-a",     // audit trail only
+  "created_at": "...",
+  "data": { ... }
 }
 ```
 
+**Access check:**
+```go
+// Framework enforces:
+1. User must be member of org_id
+2. User's role must permit the action
+3. No exceptions, no workarounds
+```
+
+**Use case:** Company wikis, team projects, org-wide settings, employee data
+
+**Example:**
+```
+POST /buckets/org/acme-corp/projects
+{
+  "name": "Q1 Launch",
+  "status": "active"
+}
+
+// Framework automatically:
+// - Verifies user is member of acme-corp
+// - Sets org_id = acme-corp (can't override)
+// - Sets created_by = current user
+// - Stores in org-projects collection
+```
+
+**User leaves org:**
+```
+Before: user-a is member of acme-corp, can access all org data
+After:  user-a removed from acme-corp, zero access instantly
+Data:   unchanged, still in org, new hire can access it
+```
+
+---
+
+#### Org Bucket Specification
+
+##### Org Roles (hierarchy)
+
+```
+owner    → full control, can delete org, transfer ownership
+admin    → manage members, all resources, settings
+manager  → manage resources, invite users
+member   → create/edit resources based on visibility
+guest    → read-only access to explicitly shared resources
+```
+
+Role permissions cascade down:
+```
+owner > admin > manager > member > guest
+```
+
+##### Org Membership Table
+
+```yaml
+org-members:
+  - org_id: acme-corp
+    user_id: user-a
+    role: owner
+    invited_by: null
+    joined_at: ...
+
+  - org_id: acme-corp
+    user_id: user-b
+    role: member
+    invited_by: user-a
+    joined_at: ...
+
+  - org_id: acme-corp
+    user_id: user-c
+    role: guest
+    invited_by: user-b
+    joined_at: ...
+```
+
+##### Resource Visibility (the "shareable" mixin)
+
+Every org resource can have a visibility mode:
+
+```
+private      → only creator can see
+invite-only  → creator + explicitly invited users/roles
+team         → all members+ can see (not guests)
+org-wide     → everyone in org including guests
+```
+
+When a resource is created, it gets a default visibility based on bucket config:
+
+```go
+// Bucket declares default visibility
+{Name: "projects", Type: OrgBucket, DefaultVisibility: "team"}
+{Name: "drafts", Type: OrgBucket, DefaultVisibility: "private"}
+{Name: "announcements", Type: OrgBucket, DefaultVisibility: "org-wide"}
+```
+
+##### Org Sharings Table
+
+Like P2P sharing, but scoped to org. Controls invite-only access:
+
+```yaml
+org-sharings:
+  - org_id: acme-corp
+    resource_type: projects    # bucket name
+    resource_id: proj-123
+
+    # WHO can access (one of these):
+    shared_with_user: user-c   # specific user
+    shared_with_role: manager  # everyone with this role+
+
+    access: read               # read or write
+    shared_by: user-a
+    created_at: ...
+```
+
+##### Access Resolution (framework enforced)
+
+```
+Can user X access resource R in org O?
+
+1. Is user X a member of org O?
+   NO → deny (hard boundary)
+
+2. What is resource R's visibility?
+
+   "org-wide" →
+     allow if member/guest of org
+
+   "team" →
+     allow if role >= member
+
+   "invite-only" →
+     check org-sharings table:
+       - shared_with_user = X? allow
+       - shared_with_role <= X's role? allow
+     else: allow if X is creator
+
+   "private" →
+     allow only if X is creator
+
+3. What access level?
+   - Check org-sharings for read/write
+   - role >= manager can always write team/org-wide resources
+   - creator can always write their own
+```
+
+##### Resource Schema (automatic via mixin)
+
+Every shareable org resource gets these fields automatically:
+
+```go
+{
+  "id": "proj-123",
+
+  // Org boundary (REQUIRED, enforced)
+  "org_id": "acme-corp",
+
+  // Audit trail
+  "created_by": "user-a",
+  "created_at": "...",
+  "updated_at": "...",
+
+  // Visibility (from mixin)
+  "visibility": "invite-only",  // private|invite-only|team|org-wide
+
+  // Actual data
+  "name": "Q1 Launch",
+  "status": "active",
+  ...
+}
+```
+
+##### Bucket Config with Abilities
+
+```go
+var OrgBuckets = []OrgBucketConfig{
+    {
+        Name: "projects",
+        DefaultVisibility: "team",
+        Abilities: []string{"shareable", "commentable"},
+    },
+    {
+        Name: "documents",
+        DefaultVisibility: "private",
+        Abilities: []string{"shareable", "versionable"},
+    },
+    {
+        Name: "announcements",
+        DefaultVisibility: "org-wide",
+        Abilities: []string{},  // read-only for most, no sharing needed
+    },
+}
+```
+
+Abilities are mixins that add behavior:
+- `shareable` → adds visibility field, enables org-sharings
+- `commentable` → enables comments sub-collection
+- `versionable` → enables version history
+
+##### API Examples
+
+```bash
+# Create project (visibility defaults to "team")
+POST /org/acme-corp/buckets/projects
+{"name": "Q1 Launch"}
+
+# Make it invite-only
+PUT /org/acme-corp/buckets/projects/proj-123
+{"visibility": "invite-only"}
+
+# Share with specific user
+POST /org/acme-corp/sharing/projects/proj-123
+{"user_id": "user-c", "access": "read"}
+
+# Share with role (all managers can see)
+POST /org/acme-corp/sharing/projects/proj-123
+{"role": "manager", "access": "write"}
+
+# List what's shared with me in this org
+GET /org/acme-corp/sharing/with-me
+
+# Guest user-c can only see:
+# - org-wide resources
+# - resources explicitly shared with them
+```
+
+##### The Mental Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Org: acme-corp                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  owner: user-a                                   │   │
+│  │  admins: [user-b]                               │   │
+│  │  managers: [user-c, user-d]                     │   │
+│  │  members: [user-e, user-f, ...]                 │   │
+│  │  guests: [contractor-1, client-1]               │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  Resources:                                             │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐   │
+│  │ proj-123     │ │ doc-456      │ │ announce-1   │   │
+│  │ vis: team    │ │ vis: private │ │ vis: org-wide│   │
+│  │ → members+   │ │ → creator    │ │ → everyone   │   │
+│  └──────────────┘ └──────────────┘ └──────────────┘   │
+│                                                         │
+│  Org Sharings:                                          │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ proj-123 → guest:contractor-1 (read)            │   │
+│  │ doc-456 → role:manager (write)                  │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  NOTHING LEAVES THIS BOX                                │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
 ##### Future Buckets (as patterns emerge)
 
-- **Org-level bucket:** Company-wide data
 - **Public bucket:** Publicly readable, admin writable
 - **Immutable bucket:** Write-once, read-many (audit logs)
 
@@ -110,13 +421,20 @@ var Buckets = []BucketConfig{
     {Name: "elevator-sessions", Type: PersonalBucket},
     {Name: "user-preferences", Type: PersonalBucket},
 }
+
+// apps/acme-crm/buckets/config.go
+var Buckets = []BucketConfig{
+    {Name: "contacts", Type: OrgBucket},      // org owns all contacts
+    {Name: "deals", Type: OrgBucket},         // org owns all deals
+    {Name: "user-settings", Type: PersonalBucket}, // user's own prefs
+}
 ```
 
 The framework handles:
-- Permission checks
-- User ID attachment
+- Permission checks (user ownership / org membership + role)
+- ID attachment (user_id / org_id)
 - CRUD operations
-- Validation
+- Boundary enforcement (no cross-org bleed)
 - Querying
 
 ---

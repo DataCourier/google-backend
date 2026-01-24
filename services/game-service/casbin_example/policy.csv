@@ -1,0 +1,57 @@
+# Policy rules: role, org, resource, action
+# Using * for "any org" (template rules)
+
+# === NOTES ===
+# member+ can create notes
+p, member, *, notes, create
+
+# member+ can edit own drafts (enforced in code with ownership check)
+p, member, *, notes, edit_own
+
+# manager+ can view all pending notes
+p, manager, *, notes, view_pending
+
+# manager+ can approve notes
+p, manager, *, notes, approve
+
+# admin+ can publish notes
+p, admin, *, notes, publish
+
+# admin+ can delete any note
+p, admin, *, notes, delete
+
+# guest+ can view published notes
+p, guest, *, notes, view_published
+
+# === PROJECTS ===
+# manager+ can create projects
+p, manager, *, projects, create
+
+# member+ can view projects
+p, member, *, projects, view
+
+# admin+ can delete projects
+p, admin, *, projects, delete
+
+# === ANNOUNCEMENTS ===
+# admin+ can create announcements
+p, admin, *, announcements, create
+
+# guest+ can view announcements
+p, guest, *, announcements, view
+
+# === ROLE HIERARCHY ===
+# user, role, org
+# These would be loaded from database, examples:
+g, alice, member, acme-corp
+g, bob, manager, acme-corp
+g, charlie, admin, acme-corp
+g, diana, owner, acme-corp
+g, eve, guest, acme-corp
+
+# Role inheritance (role, parent_role, org)
+# * means applies to all orgs
+g, member, guest, *
+g, manager, member, *
+g, admin, manager, *
+g, owner, admin, *

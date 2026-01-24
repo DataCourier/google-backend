@@ -42,6 +42,27 @@ curl http://localhost:8080/
 - ✈️ Works offline
 - 🚨 Server will error if emulator not running (prevents accidental prod writes)
 
+---
+
+## Running Tests
+
+```bash
+# Terminal 1: Start emulator
+make emulator
+
+# Terminal 2: Run tests
+cd services/game-service
+./test.sh
+```
+
+The `test.sh` script checks if the emulator is running and runs all tests. You can also pass flags:
+
+```bash
+./test.sh -run Create    # run only tests matching "Create"
+./test.sh -v             # verbose output (default)
+./test.sh -count=1       # disable test caching
+```
+
 **Template Hot Reload:**
 - Edit HTML/CSS in `views/*.html` → Just refresh browser (instant!)
 - No server restart needed for template changes

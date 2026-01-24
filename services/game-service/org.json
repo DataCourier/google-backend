@@ -1,0 +1,27 @@
+{
+  "_comment": "Org bucket resource definitions - write permissions per role",
+  "_roles": "owner > admin > manager > member > guest",
+
+  "resources": {
+    "notes": {
+      "write": "member",
+      "default_visibility": "team"
+    },
+    "projects": {
+      "write": "manager",
+      "default_visibility": "team"
+    },
+    "announcements": {
+      "write": "admin",
+      "default_visibility": "org-wide"
+    },
+    "documents": {
+      "write": "member",
+      "default_visibility": "invite-only"
+    },
+    "tasks": {
+      "write": "member",
+      "default_visibility": "team"
+    }
+  }
+}
