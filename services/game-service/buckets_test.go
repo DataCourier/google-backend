@@ -405,6 +405,62 @@ func TestOpenBucketUserIsolation(t *testing.T) {
 	}
 }
 
+func TestListPersonalBucket(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	// Clean up list-test collection before testing
+	ctx := context.Background()
+	iter := client.Collection("personal-list-test").Documents(ctx)
+	batch := client.Batch()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		batch.Delete(doc.Ref)
+	}
+	batch.Commit(ctx)
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create 3 items for user A
+	for i := 1; i <= 3; i++ {
+		doRequest(server, "POST", "/buckets/mine/list-test",
+			map[string]interface{}{"title": "Note " + string(rune('0'+i))},
+			"user-a-token")
+	}
+
+	// Create 2 items for user B
+	for i := 1; i <= 2; i++ {
+		doRequest(server, "POST", "/buckets/mine/list-test",
+			map[string]interface{}{"title": "User B Note"},
+			"user-b-token")
+	}
+
+	// List user A's items - should get exactly 3
+	listResp := doRequest(server, "GET", "/buckets/mine/list-test", nil, "user-a-token")
+	if listResp.StatusCode != 200 {
+		t.Errorf("Expected 200, got %d", listResp.StatusCode)
+	}
+
+	items := listResp.Body["data"].([]interface{})
+	if len(items) != 3 {
+		t.Errorf("Expected 3 items for user A, got %d", len(items))
+	}
+
+	// List user B's items - should get exactly 2
+	listRespB := doRequest(server, "GET", "/buckets/mine/list-test", nil, "user-b-token")
+	itemsB := listRespB.Body["data"].([]interface{})
+	if len(itemsB) != 2 {
+		t.Errorf("Expected 2 items for user B, got %d", len(itemsB))
+	}
+}
+
 // Sharing tests
 
 func TestShareItem(t *testing.T) {

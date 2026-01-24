@@ -40,6 +40,7 @@ func RegisterOpenBucketRoutes(r chi.Router, client *firestore.Client, authMiddle
 	r.Route("/buckets/mine", func(r chi.Router) {
 		r.Use(authMiddleware)
 
+		r.Get("/{bucket}", openListHandler(bucket))
 		r.Post("/{bucket}", openCreateHandler(bucket))
 		r.Get("/{bucket}/{id}", openGetHandler(bucket))
 		r.Put("/{bucket}/{id}", openUpdateHandler(bucket))
@@ -121,11 +122,37 @@ func registerPersonalBucketRoutes(r chi.Router, bucketName string, bucket *Perso
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware)
 
+		r.Get(basePath, listHandler(bucket, bucketName))
 		r.Post(basePath, createHandler(bucket, bucketName))
 		r.Get(basePath+"/{id}", getHandler(bucket, bucketName))
 		r.Put(basePath+"/{id}", updateHandler(bucket, bucketName))
 		r.Delete(basePath+"/{id}", deleteHandler(bucket, bucketName))
 	})
+}
+
+func listHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		items, err := bucket.List(r.Context(), bucketName)
+		if err != nil {
+			if strings.Contains(err.Error(), "unauthorized") {
+				respondJSON(w, http.StatusUnauthorized, map[string]string{
+					"error":   "unauthorized",
+					"message": "Authentication required",
+				})
+			} else {
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"error":   "internal_error",
+					"message": err.Error(),
+				})
+			}
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"message": "Success",
+			"data":    items,
+		})
+	}
 }
 
 func createHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFunc {
@@ -256,6 +283,14 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 }
 
 // Open handlers - bucket name from URL
+
+func openListHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		bucketName := chi.URLParam(r, "bucket")
+		trackBucket(bucketName)
+		listHandler(bucket, bucketName)(w, r)
+	}
+}
 
 func openCreateHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -120,3 +120,28 @@ func (b *PersonalBucketImpl) Delete(ctx context.Context, bucketName string, id s
 	_, err = b.client.Collection(collection).Doc(id).Delete(ctx)
 	return err
 }
+
+// List returns all items in a personal bucket for the current user.
+func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string) ([]map[string]interface{}, error) {
+	userID, ok := ctx.Value("user_id").(string)
+	if !ok || userID == "" {
+		return nil, errors.New("unauthorized")
+	}
+
+	collection := fmt.Sprintf("personal-%s", bucketName)
+
+	// Query only items belonging to this user
+	iter := b.client.Collection(collection).Where("user_id", "==", userID).Documents(ctx)
+	defer iter.Stop()
+
+	var results []map[string]interface{}
+	for {
+		doc, err := iter.Next()
+		if err != nil {
+			break // End of iteration or error
+		}
+		results = append(results, doc.Data())
+	}
+
+	return results, nil
+}
