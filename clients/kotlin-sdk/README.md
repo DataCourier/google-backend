@@ -211,6 +211,127 @@ notes.save(note)
     }
 ```
 
+## Relationships (Rails-style)
+
+Define relationships between models with automatic foreign key handling.
+
+### HasMany
+
+```kotlin
+@PersonalBucket("posts")
+class Post : PersonalActiveRecord() {
+    var title: String = ""
+
+    // Has many comments (foreign key: "postId" on Comment)
+    val comments by hasMany<Comment>()
+}
+
+@PersonalBucket("comments")
+class Comment : PersonalActiveRecord() {
+    var text: String = ""
+
+    @BelongsTo(Post::class)
+    var postId: String = ""  // Auto-filled when created via post.comments
+
+    val post by belongsTo<Post>(::postId)
+}
+```
+
+**Usage:**
+```kotlin
+val post = Post(title = "Hello")
+post.save()
+
+// Create comment with postId auto-filled
+val comment = post.comments.build().apply {
+    text = "Great post!"
+}
+comment.save()
+
+// Query
+post.comments.all()              // All comments for this post
+post.comments.count()            // Count
+post.comments.where { it.text.contains("great") }
+
+// Navigate back
+comment.post?.title              // "Hello"
+```
+
+### HasOne
+
+```kotlin
+@PersonalBucket("users")
+class User : PersonalActiveRecord() {
+    var username: String = ""
+    val profile by hasOne<Profile>()
+}
+
+@PersonalBucket("profiles")
+class Profile : PersonalActiveRecord() {
+    var bio: String = ""
+
+    @BelongsTo(User::class)
+    var userId: String = ""
+}
+```
+
+**Usage:**
+```kotlin
+val user = User(username = "alice")
+user.save()
+
+// Create profile (userId auto-filled)
+val profile = user.profile.build().apply {
+    bio = "Developer"
+}
+profile.save()
+
+// Access
+user.profile.get()?.bio  // "Developer"
+```
+
+### Custom Foreign Keys
+
+```kotlin
+@PersonalBucket("articles")
+class Article : PersonalActiveRecord() {
+    // Use explicit foreign key name
+    val comments by hasMany<ArticleComment>("articleId")
+}
+```
+
+## Offline-First Architecture
+
+The SDK is designed for offline-first mobile apps:
+
+```kotlin
+// Configure once at startup
+BucketContext.configure {
+    baseUrl = "http://localhost:8080"
+    userId = "local:test-user"
+    storage = InMemoryStorage()
+}
+
+// Operations are instant (local)
+val note = Note(title = "Hello")
+note.save()  // Instant! Saved locally
+
+// Sync happens in background
+// Check status:
+BucketContext.syncStatus.collect { status ->
+    when (status) {
+        is SyncStatus.Synced -> println("All synced!")
+        is SyncStatus.Syncing -> println("Syncing...")
+        is SyncStatus.Error -> println("Error: ${status.message}")
+    }
+}
+
+// Verify by pulling from backend
+BucketContext.refreshFromBackend("notes") { json ->
+    Note().apply { /* parse */ }
+}
+```
+
 ## Local Development
 
 Use `local:` tokens for development without magic link:

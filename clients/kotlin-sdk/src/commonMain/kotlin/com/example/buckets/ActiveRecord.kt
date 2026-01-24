@@ -148,25 +148,33 @@ abstract class ActiveRecord {
         }
 
         /**
-         * Deserialize from JSON.
+         * Deserialize from JSON (reified version).
          */
         inline fun <reified T : ActiveRecord> fromJson(json: JsonObject): T {
-            val instance = T::class.java.getDeclaredConstructor().newInstance()
+            return fromJson(json, T::class)
+        }
+
+        /**
+         * Deserialize from JSON (KClass version for relationships).
+         */
+        @Suppress("UNCHECKED_CAST")
+        fun <T : ActiveRecord> fromJson(json: JsonObject, klass: KClass<T>): T {
+            val instance = klass.java.getDeclaredConstructor().newInstance()
 
             // Set base fields
             json["id"]?.jsonPrimitive?.content?.let { instance.id = it }
             json["sync_state"]?.jsonPrimitive?.content?.let {
-                instance.syncState = SyncState.valueOf(it)
+                try { instance.syncState = SyncState.valueOf(it) } catch (e: Exception) {}
             }
             json["created_at"]?.jsonPrimitive?.content?.let {
-                instance.createdAt = Instant.parse(it)
+                try { instance.createdAt = Instant.parse(it) } catch (e: Exception) {}
             }
             json["updated_at"]?.jsonPrimitive?.content?.let {
-                instance.updatedAt = Instant.parse(it)
+                try { instance.updatedAt = Instant.parse(it) } catch (e: Exception) {}
             }
 
             // Set subclass properties
-            for (prop in T::class.memberProperties) {
+            for (prop in klass.memberProperties) {
                 if (prop !is KMutableProperty1) continue
                 val name = prop.name
                 if (name in listOf("id", "syncState", "createdAt", "updatedAt", "bucketName")) continue
@@ -175,7 +183,6 @@ abstract class ActiveRecord {
                 val jsonValue = json[jsonName] ?: json[name] ?: continue
 
                 try {
-                    @Suppress("UNCHECKED_CAST")
                     val mutableProp = prop as KMutableProperty1<T, Any?>
                     mutableProp.set(instance, jsonToValue(jsonValue))
                 } catch (e: Exception) {
