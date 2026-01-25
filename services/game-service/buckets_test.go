@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1829,6 +1830,248 @@ func TestLogout(t *testing.T) {
 	if meResp2.StatusCode != 401 {
 		t.Errorf("Session should be invalid after logout: expected 401, got %d", meResp2.StatusCode)
 	}
+}
+
+// =========================================================================
+// FILE UPLOAD TESTS
+// =========================================================================
+
+func TestUploadFileToItem(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create an item first
+	createResp := doRequest(server, "POST", "/buckets/mine/blocks",
+		map[string]interface{}{
+			"note_id":  "note-123",
+			"type":     "speech",
+			"position": 1.0,
+		},
+		"user-a-token")
+
+	if createResp.StatusCode != 200 {
+		t.Fatalf("Failed to create block: %d", createResp.StatusCode)
+	}
+	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
+
+	// Upload file to the item
+	resp := doFileUpload(server, "/buckets/mine/blocks/"+itemID+"/upload",
+		[]byte("fake audio content"),
+		"audio/mp3",
+		"user-a-token")
+
+	if resp.StatusCode != 200 {
+		t.Errorf("Expected 200, got %d: %v", resp.StatusCode, resp.Body)
+	}
+
+	// Verify response has file_url
+	data := resp.Body["data"].(map[string]interface{})
+	if data["file_url"] == nil {
+		t.Error("Expected file_url in response")
+	}
+	if data["mime_type"] != "audio/mp3" {
+		t.Errorf("Expected mime_type 'audio/mp3', got %v", data["mime_type"])
+	}
+}
+
+func TestUploadFileOnlyOwner(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// User A creates an item
+	createResp := doRequest(server, "POST", "/buckets/mine/blocks",
+		map[string]interface{}{
+			"note_id": "note-123",
+			"type":    "speech",
+		},
+		"user-a-token")
+	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
+
+	// User B tries to upload - should fail
+	resp := doFileUpload(server, "/buckets/mine/blocks/"+itemID+"/upload",
+		[]byte("hacker audio"),
+		"audio/mp3",
+		"user-b-token")
+
+	if resp.StatusCode != 403 {
+		t.Errorf("Expected 403 for non-owner upload, got %d", resp.StatusCode)
+	}
+}
+
+func TestUploadFileItemNotFound(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Try to upload to non-existent item
+	resp := doFileUpload(server, "/buckets/mine/blocks/nonexistent-id/upload",
+		[]byte("audio"),
+		"audio/mp3",
+		"user-a-token")
+
+	if resp.StatusCode != 404 {
+		t.Errorf("Expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestUploadFileNoAuth(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	resp := doFileUpload(server, "/buckets/mine/blocks/some-id/upload",
+		[]byte("audio"),
+		"audio/mp3",
+		"") // No token
+
+	if resp.StatusCode != 401 {
+		t.Errorf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestUploadFileUpdatesItem(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create block
+	createResp := doRequest(server, "POST", "/buckets/mine/blocks",
+		map[string]interface{}{
+			"note_id": "note-123",
+			"type":    "speech",
+		},
+		"user-a-token")
+	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
+
+	// Upload file
+	uploadResp := doFileUpload(server, "/buckets/mine/blocks/"+itemID+"/upload",
+		[]byte("audio content"),
+		"audio/mp3",
+		"user-a-token")
+
+	if uploadResp.StatusCode != 200 {
+		t.Fatalf("Upload failed: %d", uploadResp.StatusCode)
+	}
+
+	fileURL := uploadResp.Body["data"].(map[string]interface{})["file_url"].(string)
+
+	// Get item and verify file_url is set
+	getResp := doRequest(server, "GET", "/buckets/mine/blocks/"+itemID, nil, "user-a-token")
+	if getResp.StatusCode != 200 {
+		t.Fatalf("Get failed: %d", getResp.StatusCode)
+	}
+
+	itemData := getResp.Body["data"].(map[string]interface{})
+	if itemData["file_url"] != fileURL {
+		t.Errorf("Expected file_url '%s', got %v", fileURL, itemData["file_url"])
+	}
+}
+
+// TestUploadFilePreservesExistingFields verifies that uploading a file
+// does not wipe out existing fields on the item (regression test)
+func TestUploadFilePreservesExistingFields(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create block with multiple fields
+	createResp := doRequest(server, "POST", "/buckets/mine/blocks",
+		map[string]interface{}{
+			"note_id":  "note-456",
+			"type":     "speech",
+			"position": 1.5,
+			"content":  "transcription text",
+		},
+		"user-a-token")
+
+	if createResp.StatusCode != 200 {
+		t.Fatalf("Create failed: %d", createResp.StatusCode)
+	}
+	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
+
+	// Upload file (this should add file_url without removing other fields)
+	uploadResp := doFileUpload(server, "/buckets/mine/blocks/"+itemID+"/upload",
+		[]byte("audio content here"),
+		"audio/mp4",
+		"user-a-token")
+
+	if uploadResp.StatusCode != 200 {
+		t.Fatalf("Upload failed: %d", uploadResp.StatusCode)
+	}
+
+	// Get item and verify ALL original fields are preserved
+	getResp := doRequest(server, "GET", "/buckets/mine/blocks/"+itemID, nil, "user-a-token")
+	if getResp.StatusCode != 200 {
+		t.Fatalf("Get failed: %d", getResp.StatusCode)
+	}
+
+	itemData := getResp.Body["data"].(map[string]interface{})
+
+	// Verify file_url was added
+	if itemData["file_url"] == nil {
+		t.Error("Expected file_url to be set after upload")
+	}
+
+	// Verify original fields are preserved (not wiped out)
+	if itemData["note_id"] != "note-456" {
+		t.Errorf("Expected note_id 'note-456', got %v", itemData["note_id"])
+	}
+	if itemData["type"] != "speech" {
+		t.Errorf("Expected type 'speech', got %v", itemData["type"])
+	}
+	if itemData["position"] == nil {
+		t.Error("Expected position to be preserved")
+	}
+	if itemData["content"] != "transcription text" {
+		t.Errorf("Expected content 'transcription text', got %v", itemData["content"])
+	}
+}
+
+// Helper for file uploads
+func doFileUpload(server *httptest.Server, path string, fileContent []byte, mimeType, token string) testResponse {
+	// Create multipart form
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add file field
+	part, err := writer.CreateFormFile("file", "test-file")
+	if err != nil {
+		panic(err)
+	}
+	part.Write(fileContent)
+
+	// Add mime_type field
+	writer.WriteField("mime_type", mimeType)
+
+	writer.Close()
+
+	req, _ := http.NewRequest("POST", server.URL+path, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", token)
+	}
+
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	return testResponse{StatusCode: resp.StatusCode, Body: result}
 }
 
 // Helper for requests with custom headers

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/storage"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -46,6 +47,9 @@ func RegisterOpenBucketRoutes(r chi.Router, client *firestore.Client, authMiddle
 		r.Get("/{bucket}/{id}", openGetHandler(bucket))
 		r.Put("/{bucket}/{id}", openUpdateHandler(bucket))
 		r.Delete("/{bucket}/{id}", openDeleteHandler(bucket))
+
+		// File upload endpoint
+		r.Post("/{bucket}/{id}/upload", openUploadHandler(bucket))
 	})
 
 	// Sharing routes
@@ -722,4 +726,140 @@ func errorStatus(err error) int {
 		return http.StatusUnauthorized
 	}
 	return http.StatusInternalServerError
+}
+
+// File upload handler - stores file and updates item with file_url
+// POST /buckets/mine/{bucket}/{id}/upload
+// Content-Type: multipart/form-data
+// Form field: "file" (required)
+// Form field: "mime_type" (optional, defaults to file content type)
+func openUploadHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		bucketName := chi.URLParam(r, "bucket")
+		itemID := chi.URLParam(r, "id")
+		trackBucket(bucketName)
+
+		// Verify item exists and user owns it
+		_, err := bucket.Get(r.Context(), bucketName, itemID)
+		if err != nil {
+			if strings.Contains(err.Error(), "forbidden") {
+				respondJSON(w, http.StatusForbidden, map[string]string{
+					"error":   "forbidden",
+					"message": "You do not own this item",
+				})
+			} else if strings.Contains(err.Error(), "not found") {
+				respondJSON(w, http.StatusNotFound, map[string]string{
+					"error":   "not_found",
+					"message": "Item not found",
+				})
+			} else {
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"error":   "internal_error",
+					"message": err.Error(),
+				})
+			}
+			return
+		}
+
+		// Parse multipart form (32MB max)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "bad_request",
+				"message": "Failed to parse multipart form: " + err.Error(),
+			})
+			return
+		}
+
+		// Get uploaded file
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "bad_request",
+				"message": "Missing 'file' field in form",
+			})
+			return
+		}
+		defer file.Close()
+
+		// Get mime type from form or header
+		mimeType := r.FormValue("mime_type")
+		if mimeType == "" {
+			mimeType = header.Header.Get("Content-Type")
+		}
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+
+		// Get user ID from context
+		userID, ok := r.Context().Value("user_id").(string)
+		if !ok || userID == "" {
+			respondJSON(w, http.StatusUnauthorized, map[string]string{
+				"error":   "unauthorized",
+				"message": "User ID not found",
+			})
+			return
+		}
+
+		// Storage bucket configuration
+		storageBucket := os.Getenv("GCS_BUCKET")
+		if storageBucket == "" {
+			storageBucket = "fieldnotes-uploads-dev"
+		}
+
+		// Check if we should use mock storage (for testing)
+		useMockStorage := os.Getenv("USE_MOCK_STORAGE") == "true" ||
+			os.Getenv("FIRESTORE_EMULATOR_HOST") != ""
+
+		var fileURL string
+		var fileSize int64 = header.Size
+
+		if useMockStorage {
+			// Mock storage mode - don't actually upload to Cloud Storage
+			// Just generate a fake URL and store the metadata
+			fileURL = fmt.Sprintf("https://storage.googleapis.com/%s/users/%s/%s/%s/mock-file.%s",
+				storageBucket, userID, bucketName, itemID, mimeTypeToExt(mimeType))
+		} else {
+			// Real Cloud Storage mode
+			storageClient, err := storage.NewClient(r.Context())
+			if err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"error":   "internal_error",
+					"message": "Failed to initialize storage: " + err.Error(),
+				})
+				return
+			}
+			defer storageClient.Close()
+
+			// Upload to Cloud Storage
+			storageService := NewStorageService(storageClient, storageBucket)
+			result, err := storageService.Upload(r.Context(), userID, bucketName, itemID, file, mimeType, header.Size)
+			if err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"error":   "internal_error",
+					"message": "Failed to upload file: " + err.Error(),
+				})
+				return
+			}
+			fileURL = result.URL
+			fileSize = result.Size
+		}
+
+		// Update item with file_url
+		updateData := map[string]interface{}{
+			"file_url": fileURL,
+		}
+		if err := bucket.Update(r.Context(), bucketName, itemID, updateData); err != nil {
+			// File uploaded but metadata update failed - log but don't fail
+			fmt.Printf("Warning: file uploaded but metadata update failed: %v\n", err)
+		}
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"message": "Upload successful",
+			"data": map[string]interface{}{
+				"file_url":  fileURL,
+				"mime_type": mimeType,
+				"size":      fileSize,
+			},
+		})
+	}
 }

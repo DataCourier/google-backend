@@ -54,7 +54,7 @@ deploy-game:
 		--region $(GCP_REGION) \
 		--allow-unauthenticated \
 		--platform managed \
-		--set-env-vars GCP_PROJECT=$(PROJECT_NAME) \
+		--set-env-vars ENV=production,GCP_PROJECT=michal-playground-2026 \
 		--quiet
 
 deploy-org:

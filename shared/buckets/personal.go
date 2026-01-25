@@ -87,9 +87,18 @@ func (b *PersonalBucketImpl) Update(ctx context.Context, bucketName string, id s
 		return errors.New("forbidden: not your data")
 	}
 
-	// Update fields
+	// Merge new data with existing data (preserves fields not in the update)
+	for key, value := range existingData {
+		if _, exists := data[key]; !exists {
+			data[key] = value
+		}
+	}
+
+	// Preserve system fields that shouldn't be overwritten
+	data["id"] = id
+	data["user_id"] = userID
+	data["created_at"] = existingData["created_at"]
 	data["updated_at"] = time.Now()
-	data["user_id"] = userID // Prevent changing owner
 
 	_, err = b.client.Collection(collection).Doc(id).Set(ctx, data)
 	return err

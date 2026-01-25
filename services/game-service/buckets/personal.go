@@ -87,9 +87,18 @@ func (b *PersonalBucketImpl) Update(ctx context.Context, bucketName string, id s
 		return errors.New("forbidden: not your data")
 	}
 
-	// Update fields
+	// Merge new data with existing data (preserves fields not in the update)
+	for key, value := range existingData {
+		if _, exists := data[key]; !exists {
+			data[key] = value
+		}
+	}
+
+	// Preserve system fields that shouldn't be overwritten
+	data["id"] = id
+	data["user_id"] = userID
+	data["created_at"] = existingData["created_at"]
 	data["updated_at"] = time.Now()
-	data["user_id"] = userID // Prevent changing owner
 
 	_, err = b.client.Collection(collection).Doc(id).Set(ctx, data)
 	return err
@@ -119,6 +128,46 @@ func (b *PersonalBucketImpl) Delete(ctx context.Context, bucketName string, id s
 
 	_, err = b.client.Collection(collection).Doc(id).Delete(ctx)
 	return err
+}
+
+// List returns items in a personal bucket for the current user.
+// Supports optional filters for equality queries.
+// Example: filters = {"status": "active", "priority": "5"}
+func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filters ...map[string]interface{}) ([]map[string]interface{}, error) {
+	userID, ok := ctx.Value("user_id").(string)
+	if !ok || userID == "" {
+		return nil, errors.New("unauthorized")
+	}
+
+	collection := fmt.Sprintf("personal-%s", bucketName)
+
+	// Start with user_id filter (always required)
+	query := b.client.Collection(collection).Where("user_id", "==", userID)
+
+	// Apply additional filters if provided
+	if len(filters) > 0 && filters[0] != nil {
+		for key, value := range filters[0] {
+			// Skip internal fields
+			if key == "user_id" {
+				continue
+			}
+			query = query.Where(key, "==", value)
+		}
+	}
+
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+
+	var results []map[string]interface{}
+	for {
+		doc, err := iter.Next()
+		if err != nil {
+			break // End of iteration or error
+		}
+		results = append(results, doc.Data())
+	}
+
+	return results, nil
 }
 
 // BatchResult represents the result of a single record in a batch operation.
@@ -175,46 +224,6 @@ func (b *PersonalBucketImpl) Batch(ctx context.Context, bucketName string, recor
 		} else {
 			results[i] = BatchResult{ID: id, Status: "created"}
 		}
-	}
-
-	return results, nil
-}
-
-// List returns items in a personal bucket for the current user.
-// Supports optional filters for equality queries.
-// Example: filters = {"status": "active", "priority": "5"}
-func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filters ...map[string]interface{}) ([]map[string]interface{}, error) {
-	userID, ok := ctx.Value("user_id").(string)
-	if !ok || userID == "" {
-		return nil, errors.New("unauthorized")
-	}
-
-	collection := fmt.Sprintf("personal-%s", bucketName)
-
-	// Start with user_id filter (always required)
-	query := b.client.Collection(collection).Where("user_id", "==", userID)
-
-	// Apply additional filters if provided
-	if len(filters) > 0 && filters[0] != nil {
-		for key, value := range filters[0] {
-			// Skip internal fields
-			if key == "user_id" {
-				continue
-			}
-			query = query.Where(key, "==", value)
-		}
-	}
-
-	iter := query.Documents(ctx)
-	defer iter.Stop()
-
-	var results []map[string]interface{}
-	for {
-		doc, err := iter.Next()
-		if err != nil {
-			break // End of iteration or error
-		}
-		results = append(results, doc.Data())
 	}
 
 	return results, nil
