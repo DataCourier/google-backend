@@ -93,6 +93,9 @@ See LOCAL-DEVELOPMENT.md for details.
 	// Bucket routes (personal, sharing, org)
 	buckets.RegisterOpenBucketRoutes(r, firestoreClient, authMiddleware)
 
+	// Admin routes (protected by API key)
+	buckets.RegisterAdminRoutes(r, firestoreClient, auth.AdminMiddleware())
+
 	// Game routes (existing)
 	r.Post("/games/{gameId}/move", makeMoveHandler)
 	r.Get("/games/{gameId}", viewGameHandler)

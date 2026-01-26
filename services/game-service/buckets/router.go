@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -12,6 +13,55 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/go-chi/chi/v5"
 )
+
+// Pattern to detect Kotlin/Java toString() output: ClassName(field=value)
+// Examples: FileField(mimeType=audio/mp4, ...), Note(id=abc, ...)
+var serializedObjectPattern = regexp.MustCompile(`^[A-Z][a-zA-Z0-9_]*\([a-zA-Z_]+=`)
+
+// validateNoSerializedObjects checks that no string values look like
+// accidentally serialized Kotlin/Java objects (e.g., "FileField(mimeType=...)")
+// Returns field path and error if found, empty string and nil if valid.
+func validateNoSerializedObjects(data map[string]interface{}, path string) (string, error) {
+	for key, value := range data {
+		fieldPath := key
+		if path != "" {
+			fieldPath = path + "." + key
+		}
+
+		switch v := value.(type) {
+		case string:
+			if serializedObjectPattern.MatchString(v) {
+				return fieldPath, fmt.Errorf("field '%s' contains serialized object (got '%s...'). Send proper JSON instead", fieldPath, truncate(v, 50))
+			}
+		case map[string]interface{}:
+			if fp, err := validateNoSerializedObjects(v, fieldPath); err != nil {
+				return fp, err
+			}
+		case []interface{}:
+			for i, item := range v {
+				itemPath := fmt.Sprintf("%s[%d]", fieldPath, i)
+				if str, ok := item.(string); ok {
+					if serializedObjectPattern.MatchString(str) {
+						return itemPath, fmt.Errorf("field '%s' contains serialized object (got '%s...'). Send proper JSON instead", itemPath, truncate(str, 50))
+					}
+				}
+				if m, ok := item.(map[string]interface{}); ok {
+					if fp, err := validateNoSerializedObjects(m, itemPath); err != nil {
+						return fp, err
+					}
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}
 
 var (
 	discoveredBuckets = make(map[string]bool)
@@ -182,8 +232,25 @@ func createHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFu
 			return
 		}
 
+		// Validate no serialized objects (catches client serialization bugs)
+		if _, err := validateNoSerializedObjects(data, ""); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "validation_error",
+				"message": err.Error(),
+			})
+			return
+		}
+
 		id, err := bucket.Create(r.Context(), bucketName, data)
 		if err != nil {
+			// Return 400 for validation errors (e.g., missing ID)
+			if strings.Contains(err.Error(), "id is required") {
+				respondJSON(w, http.StatusBadRequest, map[string]string{
+					"error":   "bad_request",
+					"message": err.Error(),
+				})
+				return
+			}
 			respondJSON(w, http.StatusInternalServerError, map[string]string{
 				"error":   "internal_error",
 				"message": err.Error(),
@@ -240,6 +307,15 @@ func updateHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFu
 			respondJSON(w, http.StatusBadRequest, map[string]string{
 				"error":   "bad_request",
 				"message": "Invalid JSON",
+			})
+			return
+		}
+
+		// Validate no serialized objects (catches client serialization bugs)
+		if _, err := validateNoSerializedObjects(data, ""); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "validation_error",
+				"message": err.Error(),
 			})
 			return
 		}
@@ -366,6 +442,17 @@ func batchHandler(bucket *PersonalBucketImpl, bucketName string) http.HandlerFun
 				"message": "Batch size exceeds limit of 100 records",
 			})
 			return
+		}
+
+		// Validate no serialized objects in any record
+		for i, record := range records {
+			if _, err := validateNoSerializedObjects(record, ""); err != nil {
+				respondJSON(w, http.StatusBadRequest, map[string]string{
+					"error":   "validation_error",
+					"message": fmt.Sprintf("Record %d: %s", i, err.Error()),
+				})
+				return
+			}
 		}
 
 		results, err := bucket.Batch(r.Context(), bucketName, records)
@@ -739,8 +826,8 @@ func openUploadHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 		itemID := chi.URLParam(r, "id")
 		trackBucket(bucketName)
 
-		// Verify item exists and user owns it
-		_, err := bucket.Get(r.Context(), bucketName, itemID)
+		// Verify item exists and user owns it (also get data for locations.server update)
+		existingDoc, err := bucket.Get(r.Context(), bucketName, itemID)
 		if err != nil {
 			if strings.Contains(err.Error(), "forbidden") {
 				respondJSON(w, http.StatusForbidden, map[string]string{
@@ -848,6 +935,29 @@ func openUploadHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 		updateData := map[string]interface{}{
 			"file_url": fileURL,
 		}
+
+		// Generic: find any field with a "locations" map and set locations.server
+		// This works for image, audio, video, or any future file field type
+		if existingDoc != nil {
+			for fieldName, fieldValue := range existingDoc {
+				if fieldMap, ok := fieldValue.(map[string]interface{}); ok {
+					if _, hasLocations := fieldMap["locations"]; hasLocations {
+						// This field has a locations map - add server URL
+						locations := make(map[string]interface{})
+						if existingLoc, ok := fieldMap["locations"].(map[string]interface{}); ok {
+							// Preserve existing locations (like "local")
+							for k, v := range existingLoc {
+								locations[k] = v
+							}
+						}
+						locations["server"] = fileURL
+						fieldMap["locations"] = locations
+						updateData[fieldName] = fieldMap
+					}
+				}
+			}
+		}
+
 		if err := bucket.Update(r.Context(), bucketName, itemID, updateData); err != nil {
 			// File uploaded but metadata update failed - log but don't fail
 			fmt.Printf("Warning: file uploaded but metadata update failed: %v\n", err)

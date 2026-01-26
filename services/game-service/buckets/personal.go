@@ -27,8 +27,13 @@ func (b *PersonalBucketImpl) Create(ctx context.Context, bucketName string, data
 		return "", errors.New("unauthorized: user_id not found")
 	}
 
-	id := uuid.New().String()
-	data["id"] = id
+	// Require client-provided ID (offline-first architecture)
+	// Clients generate IDs locally before syncing - server must not generate IDs
+	// as it would break the local-server record link
+	id, ok := data["id"].(string)
+	if !ok || id == "" {
+		return "", errors.New("id is required: offline-first clients must provide ID")
+	}
 	data["user_id"] = userID
 	data["created_at"] = time.Now()
 	data["updated_at"] = time.Now()

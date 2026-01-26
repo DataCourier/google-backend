@@ -248,3 +248,31 @@ func respondUnauthorized(w http.ResponseWriter, message string) {
 		"message": message,
 	})
 }
+
+// AdminMiddleware validates admin API key from ADMIN_API_KEY env var
+// Header: X-Admin-Key: <key>
+func AdminMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			adminKey := os.Getenv("ADMIN_API_KEY")
+			if adminKey == "" {
+				// No admin key configured - reject all admin requests
+				respondUnauthorized(w, "admin access not configured")
+				return
+			}
+
+			providedKey := r.Header.Get("X-Admin-Key")
+			if providedKey == "" {
+				respondUnauthorized(w, "missing X-Admin-Key header")
+				return
+			}
+
+			if providedKey != adminKey {
+				respondUnauthorized(w, "invalid admin key")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}

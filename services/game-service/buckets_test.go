@@ -132,8 +132,9 @@ func TestCreateItem(t *testing.T) {
 	server := httptest.NewServer(setupTestRouter(client))
 	defer server.Close()
 
+	// Offline-first: client must provide ID
 	resp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "Test Item", "count": 42},
+		map[string]interface{}{"id": "test-create-item-1", "title": "Test Item", "count": 42},
 		"user-a-token")
 
 	if resp.StatusCode != 200 {
@@ -147,6 +148,9 @@ func TestCreateItem(t *testing.T) {
 	if data["title"] != "Test Item" {
 		t.Errorf("Expected title 'Test Item', got %v", data["title"])
 	}
+	if data["id"] != "test-create-item-1" {
+		t.Errorf("Expected id 'test-create-item-1', got %v", data["id"])
+	}
 }
 
 func TestCreateItemNoAuth(t *testing.T) {
@@ -159,11 +163,31 @@ func TestCreateItemNoAuth(t *testing.T) {
 	defer server.Close()
 
 	resp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "Test"},
+		map[string]interface{}{"id": "test-no-auth-1", "title": "Test"},
 		"") // No token
 
 	if resp.StatusCode != 401 {
 		t.Errorf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+// Offline-first: client must provide ID, server must not generate one
+func TestCreateItemRequiresID(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupTestData(ctx, client)
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Try to create without ID - should fail
+	resp := doRequest(server, "POST", "/buckets/personal/test-data",
+		map[string]interface{}{"title": "No ID Provided"},
+		"user-a-token")
+
+	if resp.StatusCode != 400 {
+		t.Errorf("Expected 400 (bad request), got %d - server should require client-provided ID", resp.StatusCode)
 	}
 }
 
@@ -178,7 +202,7 @@ func TestGetOwnItem(t *testing.T) {
 
 	// Create item
 	createResp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "My Item"},
+		map[string]interface{}{"id": "test-get-own-1", "title": "My Item"},
 		"user-a-token")
 	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
 
@@ -201,7 +225,7 @@ func TestGetOtherUserItem(t *testing.T) {
 
 	// User A creates item
 	createResp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "User A's Item"},
+		map[string]interface{}{"id": "test-get-other-1", "title": "User A's Item"},
 		"user-a-token")
 	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
 
@@ -224,7 +248,7 @@ func TestUpdateOwnItem(t *testing.T) {
 
 	// Create
 	createResp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "Original"},
+		map[string]interface{}{"id": "test-update-own-1", "title": "Original"},
 		"user-a-token")
 	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
 
@@ -249,7 +273,7 @@ func TestUpdateOtherUserItem(t *testing.T) {
 
 	// User A creates
 	createResp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "User A's"},
+		map[string]interface{}{"id": "test-update-other-1", "title": "User A's"},
 		"user-a-token")
 	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
 
@@ -274,7 +298,7 @@ func TestDeleteOwnItem(t *testing.T) {
 
 	// Create
 	createResp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "To Delete"},
+		map[string]interface{}{"id": "test-delete-own-1", "title": "To Delete"},
 		"user-a-token")
 	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
 
@@ -303,7 +327,7 @@ func TestDeleteOtherUserItem(t *testing.T) {
 
 	// User A creates
 	createResp := doRequest(server, "POST", "/buckets/personal/test-data",
-		map[string]interface{}{"title": "Protected"},
+		map[string]interface{}{"id": "test-delete-other-1", "title": "Protected"},
 		"user-a-token")
 	itemID := createResp.Body["data"].(map[string]interface{})["id"].(string)
 
