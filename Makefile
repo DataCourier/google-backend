@@ -1,4 +1,4 @@
-.PHONY: setup sync deploy deploy-user deploy-game deploy-org test clean help emulator dev-game
+.PHONY: setup sync deploy deploy-user deploy-game deploy-org deploy-stock test clean help emulator dev-game
 
 # Load config
 PROJECT_NAME ?= my-app
@@ -18,6 +18,7 @@ help:
 	@echo "  make deploy-user - Deploy user-service only"
 	@echo "  make deploy-game - Deploy game-service only"
 	@echo "  make deploy-org  - Deploy org-service only"
+	@echo "  make deploy-stock- Deploy stock-prices service"
 	@echo ""
 	@echo "Other:"
 	@echo "  make test        - Run tests for all services"
@@ -61,6 +62,16 @@ deploy-org:
 	@echo "🚀 Deploying org-service..."
 	@cd services/org-service && \
 		gcloud run deploy org-service \
+		--source . \
+		--region $(GCP_REGION) \
+		--allow-unauthenticated \
+		--platform managed \
+		--quiet
+
+deploy-stock:
+	@echo "Deploying stock-prices..."
+	@cd standalone-apis/stock-prices && \
+		gcloud run deploy stock-prices \
 		--source . \
 		--region $(GCP_REGION) \
 		--allow-unauthenticated \

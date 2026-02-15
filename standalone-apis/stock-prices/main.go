@@ -14,9 +14,11 @@ import (
 )
 
 var (
-	fsClient  *firestore.Client
-	gcsBucket *storage.BucketHandle
-	finnhub   *FinnhubClient
+	fsClient         *firestore.Client
+	gcsBucket        *storage.BucketHandle
+	finnhub          *FinnhubClient
+	telegramBotToken string
+	telegramChatID   string
 )
 
 func main() {
@@ -63,6 +65,10 @@ func main() {
 	}
 	finnhub = NewFinnhubClient(apiKey)
 
+	// Telegram (optional)
+	telegramBotToken = os.Getenv("TELEGRAM_BOT_TOKEN")
+	telegramChatID = os.Getenv("TELEGRAM_CHAT_ID")
+
 	// Routes
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -76,6 +82,7 @@ func main() {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
+	r.Post("/health-report", healthReportHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -165,6 +172,18 @@ func universeHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := RunUniverseUpdate(ctx, gcsBucket, finnhub); err != nil {
 		log.Printf("Universe update error: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func healthReportHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := RunHealthCheck(ctx, fsClient, telegramBotToken, telegramChatID); err != nil {
+		log.Printf("Health report error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -55,6 +55,12 @@ func CronRouter(ctx context.Context, fsClient *firestore.Client, gcsBucket *stor
 		results["fundamentals"] = RunFundamentalsCycle(ctx, fsClient, gcsBucket, fh)
 	}
 
+	// 13:15 UTC — daily health check (after universe + fundamentals kick off)
+	if hour == 13 && minute >= 15 && minute < 20 {
+		log.Println("CRON: daily health check")
+		results["health"] = RunHealthCheck(ctx, fsClient, telegramBotToken, telegramChatID)
+	}
+
 	// 00:00 UTC — midnight subscriber count reset
 	if hour == 0 && minute < 5 {
 		log.Println("CRON: midnight subscriber rotation")
