@@ -27,6 +27,9 @@ go.work
 .DS_Store
 Thumbs.db
 
+# Claude notes (secrets)
+.claude/notes/
+
 # Environment
 .env
 .env.local
