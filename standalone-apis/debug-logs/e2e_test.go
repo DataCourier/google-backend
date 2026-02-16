@@ -17,6 +17,34 @@ func baseURL(t *testing.T) string {
 	return u
 }
 
+func testAPIKey(t *testing.T) string {
+	t.Helper()
+	k := os.Getenv("API_KEY")
+	if k == "" {
+		t.Fatal("API_KEY not set")
+	}
+	return k
+}
+
+func authedPost(url, key string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", key)
+	return http.DefaultClient.Do(req)
+}
+
+func authedGet(url, key string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-API-Key", key)
+	return http.DefaultClient.Do(req)
+}
+
 func TestE2E_Health(t *testing.T) {
 	resp, err := http.Get(baseURL(t) + "/health")
 	if err != nil {
@@ -28,10 +56,45 @@ func TestE2E_Health(t *testing.T) {
 	}
 }
 
-func TestE2E_PostAndGetLog(t *testing.T) {
+func TestE2E_Unauthorized(t *testing.T) {
 	url := baseURL(t)
 
-	// Post a log
+	// No key
+	body, _ := json.Marshal(map[string]interface{}{"app": "test", "logs": "x"})
+	resp, err := http.Post(url+"/log", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("no key: expected 401, got %d", resp.StatusCode)
+	}
+
+	// Wrong key
+	resp2, err := authedPost(url+"/log", "wrong-key", body)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 401 {
+		t.Errorf("wrong key: expected 401, got %d", resp2.StatusCode)
+	}
+
+	// GET without key
+	resp3, err := http.Get(url + "/logs")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != 401 {
+		t.Errorf("GET /logs no key: expected 401, got %d", resp3.StatusCode)
+	}
+}
+
+func TestE2E_PostAndGetLog(t *testing.T) {
+	url := baseURL(t)
+	key := testAPIKey(t)
+
 	body, _ := json.Marshal(map[string]interface{}{
 		"app": "e2e-test-app",
 		"logs": map[string]interface{}{
@@ -41,7 +104,7 @@ func TestE2E_PostAndGetLog(t *testing.T) {
 		},
 	})
 
-	resp, err := http.Post(url+"/log", "application/json", bytes.NewReader(body))
+	resp, err := authedPost(url+"/log", key, body)
 	if err != nil {
 		t.Fatalf("POST /log failed: %v", err)
 	}
@@ -50,8 +113,7 @@ func TestE2E_PostAndGetLog(t *testing.T) {
 		t.Fatalf("POST /log: expected 200, got %d", resp.StatusCode)
 	}
 
-	// Read it back
-	resp, err = http.Get(url + "/log/e2e-test-app")
+	resp, err = authedGet(url+"/log/e2e-test-app", key)
 	if err != nil {
 		t.Fatalf("GET /log/e2e-test-app failed: %v", err)
 	}
@@ -83,23 +145,15 @@ func TestE2E_PostAndGetLog(t *testing.T) {
 
 func TestE2E_PostOverwrites(t *testing.T) {
 	url := baseURL(t)
+	key := testAPIKey(t)
 
-	// Post first version
-	body1, _ := json.Marshal(map[string]interface{}{
-		"app":  "e2e-overwrite",
-		"logs": "version1",
-	})
-	http.Post(url+"/log", "application/json", bytes.NewReader(body1))
+	body1, _ := json.Marshal(map[string]interface{}{"app": "e2e-overwrite", "logs": "version1"})
+	authedPost(url+"/log", key, body1)
 
-	// Post second version
-	body2, _ := json.Marshal(map[string]interface{}{
-		"app":  "e2e-overwrite",
-		"logs": "version2",
-	})
-	http.Post(url+"/log", "application/json", bytes.NewReader(body2))
+	body2, _ := json.Marshal(map[string]interface{}{"app": "e2e-overwrite", "logs": "version2"})
+	authedPost(url+"/log", key, body2)
 
-	// Should get version2
-	resp, _ := http.Get(url + "/log/e2e-overwrite")
+	resp, _ := authedGet(url+"/log/e2e-overwrite", key)
 	defer resp.Body.Close()
 
 	var data map[string]interface{}
@@ -111,7 +165,8 @@ func TestE2E_PostOverwrites(t *testing.T) {
 }
 
 func TestE2E_GetNotFound(t *testing.T) {
-	resp, err := http.Get(baseURL(t) + "/log/nonexistent-app-xyz")
+	key := testAPIKey(t)
+	resp, err := authedGet(baseURL(t)+"/log/nonexistent-app-xyz", key)
 	if err != nil {
 		t.Fatalf("GET failed: %v", err)
 	}
@@ -123,12 +178,11 @@ func TestE2E_GetNotFound(t *testing.T) {
 
 func TestE2E_PostValidation(t *testing.T) {
 	url := baseURL(t)
+	key := testAPIKey(t)
 
 	// Missing app
-	body, _ := json.Marshal(map[string]interface{}{
-		"logs": "something",
-	})
-	resp, err := http.Post(url+"/log", "application/json", bytes.NewReader(body))
+	body, _ := json.Marshal(map[string]interface{}{"logs": "something"})
+	resp, err := authedPost(url+"/log", key, body)
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
@@ -138,27 +192,24 @@ func TestE2E_PostValidation(t *testing.T) {
 	}
 
 	// Invalid JSON
-	resp, err = http.Post(url+"/log", "application/json", bytes.NewReader([]byte("not json")))
+	resp2, err := authedPost(url+"/log", key, []byte("not json"))
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 400 {
-		t.Errorf("bad json: expected 400, got %d", resp.StatusCode)
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 400 {
+		t.Errorf("bad json: expected 400, got %d", resp2.StatusCode)
 	}
 }
 
 func TestE2E_ListLogs(t *testing.T) {
 	url := baseURL(t)
+	key := testAPIKey(t)
 
-	// Ensure at least one log exists
-	body, _ := json.Marshal(map[string]interface{}{
-		"app":  "e2e-list-test",
-		"logs": "hello",
-	})
-	http.Post(url+"/log", "application/json", bytes.NewReader(body))
+	body, _ := json.Marshal(map[string]interface{}{"app": "e2e-list-test", "logs": "hello"})
+	authedPost(url+"/log", key, body)
 
-	resp, err := http.Get(url + "/logs")
+	resp, err := authedGet(url+"/logs", key)
 	if err != nil {
 		t.Fatalf("GET /logs failed: %v", err)
 	}

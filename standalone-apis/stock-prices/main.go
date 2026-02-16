@@ -83,6 +83,7 @@ func main() {
 		w.Write([]byte("ok"))
 	})
 	r.Post("/health-report", healthReportHandler)
+	r.Post("/ath-refresh", athRefreshHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -184,6 +185,18 @@ func healthReportHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := RunHealthCheck(ctx, fsClient, telegramBotToken, telegramChatID); err != nil {
 		log.Printf("Health report error: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func athRefreshHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := RunATHRefresh(ctx, fsClient, gcsBucket, finnhub); err != nil {
+		log.Printf("ATH refresh error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -4,15 +4,25 @@ A lightweight remote debug log service. Any app can POST debug state and you can
 
 **Base URL:** `https://debug-logs-133184350530.us-central1.run.app`
 
+## Authentication
+
+All endpoints except `/health` require an API key in the `X-API-Key` header.
+
+```
+X-API-Key: <your-api-key>
+```
+
+Requests without a valid key receive `401 Unauthorized`.
+
 ## Quick Start
 
 ### From your app (Kotlin)
 ```kotlin
-// Post debug state — call this whenever you want to inspect something
 val client = OkHttpClient()
 val json = """{"app":"my-app","logs":{"screen":"main","state":"loading","items":5}}"""
 client.newCall(Request.Builder()
     .url("https://debug-logs-133184350530.us-central1.run.app/log")
+    .header("X-API-Key", BuildConfig.DEBUG_LOG_API_KEY)
     .post(json.toRequestBody("application/json".toMediaType()))
     .build()
 ).execute()
@@ -20,11 +30,13 @@ client.newCall(Request.Builder()
 
 ### From your terminal
 ```bash
+KEY="your-api-key"
+
 # Read latest dump
-curl -s https://debug-logs-133184350530.us-central1.run.app/log/my-app | python3 -m json.tool
+curl -s -H "X-API-Key: $KEY" https://debug-logs-133184350530.us-central1.run.app/log/my-app | python3 -m json.tool
 
 # List all apps
-curl -s https://debug-logs-133184350530.us-central1.run.app/logs | python3 -m json.tool
+curl -s -H "X-API-Key: $KEY" https://debug-logs-133184350530.us-central1.run.app/logs | python3 -m json.tool
 ```
 
 ---
@@ -33,7 +45,7 @@ curl -s https://debug-logs-133184350530.us-central1.run.app/logs | python3 -m js
 
 ### `GET /health`
 
-Health check.
+Health check. No auth required.
 
 **Response:** `200 OK` — `ok`
 
@@ -42,6 +54,8 @@ Health check.
 ### `POST /log`
 
 Store debug data for an app. Overwrites any previous dump for that app name.
+
+**Headers:** `X-API-Key: <key>`
 
 **Request:**
 ```json
@@ -59,6 +73,7 @@ Store debug data for an app. Overwrites any previous dump for that app name.
 ```
 
 **Errors:**
+- `401` — missing or invalid API key
 - `400` — missing `app` field or invalid JSON
 
 ---
@@ -66,6 +81,8 @@ Store debug data for an app. Overwrites any previous dump for that app name.
 ### `GET /log/{app}`
 
 Retrieve the latest debug dump for an app.
+
+**Headers:** `X-API-Key: <key>`
 
 **Response:** `200 OK`
 ```json
@@ -83,6 +100,7 @@ Retrieve the latest debug dump for an app.
 | `updated_at` | int64 | Unix millis when last posted |
 
 **Errors:**
+- `401` — missing or invalid API key
 - `404` — no logs found for that app name
 
 ---
@@ -90,6 +108,8 @@ Retrieve the latest debug dump for an app.
 ### `GET /logs`
 
 List all apps that have debug logs (without the full log data).
+
+**Headers:** `X-API-Key: <key>`
 
 **Response:** `200 OK`
 ```json
@@ -99,11 +119,14 @@ List all apps that have debug logs (without the full log data).
 ]
 ```
 
+**Errors:**
+- `401` — missing or invalid API key
+
 ---
 
 ## Notes
 
 - Each app gets one slot — posting overwrites the previous dump
-- No auth required (debug builds only, don't ship to production)
+- Only include in debug builds — don't ship the API key to production
 - Data lives in Firestore `debug_logs` collection
 - Service scales to zero when idle (no cost when not in use)

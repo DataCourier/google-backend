@@ -14,7 +14,10 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-var fsClient *firestore.Client
+var (
+	fsClient *firestore.Client
+	apiKey   string
+)
 
 func main() {
 	ctx := context.Background()
@@ -38,6 +41,11 @@ func main() {
 	}
 	defer fsClient.Close()
 
+	apiKey = os.Getenv("API_KEY")
+	if apiKey == "" {
+		log.Fatal("API_KEY not set")
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -45,9 +53,13 @@ func main() {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	r.Post("/log", postLogHandler)
-	r.Get("/log/{app}", getLogHandler)
-	r.Get("/logs", listLogsHandler)
+
+	r.Group(func(r chi.Router) {
+		r.Use(apiKeyAuth)
+		r.Post("/log", postLogHandler)
+		r.Get("/log/{app}", getLogHandler)
+		r.Get("/logs", listLogsHandler)
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -58,6 +70,17 @@ func main() {
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func apiKeyAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-API-Key")
+		if key != apiKey {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // POST /log

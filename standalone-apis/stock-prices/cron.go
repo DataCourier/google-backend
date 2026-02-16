@@ -55,6 +55,12 @@ func CronRouter(ctx context.Context, fsClient *firestore.Client, gcsBucket *stor
 		results["fundamentals"] = RunFundamentalsCycle(ctx, fsClient, gcsBucket, fh)
 	}
 
+	// Monday 14:00 UTC — weekly ATH refresh (after fundamentals, uses 52wk high + CoinGecko)
+	if now.Weekday() == time.Monday && hour == 14 && minute < 5 {
+		log.Println("CRON: weekly ATH refresh")
+		results["ath"] = RunATHRefresh(ctx, fsClient, gcsBucket, fh)
+	}
+
 	// 13:15 UTC — daily health check (after universe + fundamentals kick off)
 	if hour == 13 && minute >= 15 && minute < 20 {
 		log.Println("CRON: daily health check")
