@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Routes, Route, useNavigate, useParams, useLocation } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import AddChannel from "./AddChannel";
 import ChannelList from "./ChannelList";
 import Feed from "./Feed";
@@ -17,9 +17,19 @@ function App() {
 
   const [channels, setChannels] = useState([]);
   const [videos, setVideos] = useState([]);
+  const [videosTotal, setVideosTotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const page = searchParams.get("p") || "";
+
+  function nav(p) {
+    if (p) {
+      setSearchParams({ p });
+    } else {
+      setSearchParams({});
+    }
+  }
 
   const loadChannels = useCallback(async () => {
     const data = await listRecords("channels");
@@ -27,16 +37,33 @@ function App() {
     return data || [];
   }, []);
 
-  const loadVideos = useCallback(async () => {
-    const data = await listRecords("videos");
-    setVideos(data || []);
+  const PAGE_SIZE = 100;
+
+  const loadVideos = useCallback(async (append = false, offset = 0) => {
+    const result = await listRecords("videos", {
+      limit: PAGE_SIZE,
+      offset,
+      orderBy: "published",
+      orderDir: "desc",
+    });
+    if (append) {
+      setVideos((prev) => [...prev, ...result.data]);
+    } else {
+      setVideos(result.data);
+    }
+    setVideosTotal(result.total);
   }, []);
+
+  const loadMoreVideos = useCallback(async () => {
+    await loadVideos(true, videos.length);
+  }, [loadVideos, videos.length]);
 
   const refreshFeeds = useCallback(
     async (channelList) => {
       setRefreshing(true);
       try {
-        const existingIds = new Set(videos.map((v) => v.video_id));
+        const allVids = await listRecords("videos");
+        const existingIds = new Set(allVids.map((v) => v.video_id));
         let newVideos = [];
 
         for (const ch of channelList) {
@@ -74,10 +101,11 @@ function App() {
         setRefreshing(false);
       }
     },
-    [videos, loadVideos]
+    [loadVideos]
   );
 
   useEffect(() => {
+    if (!loggedIn) return;
     async function init() {
       const chs = await loadChannels();
       await loadVideos();
@@ -125,27 +153,50 @@ function App() {
       }
     }
     init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loggedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function todayStr() {
     return new Date().toISOString().slice(0, 10);
   }
 
-  // Derive selected state from URL
-  const path = location.pathname;
+  // Derive selected state from ?p= param
   let selectedChannel = null;
-  if (path === "/liked") selectedChannel = "liked";
-  else if (path === "/watch-later") selectedChannel = "watch_later";
-  else if (path === "/notes") selectedChannel = "notes";
-  else if (path.startsWith("/channel/")) selectedChannel = path.slice("/channel/".length);
+  if (page === "liked") selectedChannel = "liked";
+  else if (page === "watch-later") selectedChannel = "watch_later";
+  else if (page === "notes") selectedChannel = "notes";
+  else if (page.startsWith("channel/")) selectedChannel = page.slice("channel/".length);
 
   function handleSelectChannel(channelId) {
-    if (!channelId) navigate("/");
-    else navigate(`/channel/${channelId}`);
+    if (!channelId) nav("");
+    else nav(`channel/${channelId}`);
   }
 
   if (!loggedIn) {
     return <LoginPage onLogin={() => setLoggedIn(true)} />;
+  }
+
+  // Video page
+  if (page.startsWith("video/")) {
+    const videoId = page.slice("video/".length);
+    const video = videos.find((v) => v.video_id === videoId);
+    if (!video) {
+      return (
+        <div className="flex h-screen bg-neutral-950 text-neutral-100 items-center justify-center">
+          <div className="text-neutral-400 text-sm">Video not found</div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex h-screen bg-neutral-950 text-neutral-100">
+        <div className="flex-1 p-6 overflow-y-auto">
+          <VideoPage
+            video={video}
+            onBack={() => window.history.back()}
+            onUpdated={loadVideos}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -154,7 +205,7 @@ function App() {
       <div className="w-64 border-r border-neutral-800 p-4 flex flex-col">
         <h1
           className="text-lg font-bold text-red-500 mb-4 cursor-pointer"
-          onClick={() => navigate("/")}
+          onClick={() => nav("")}
         >
           FocusTube
         </h1>
@@ -166,7 +217,8 @@ function App() {
               setRefreshing(true);
               try {
                 const feed = await fetchRSS(latest.channel_id);
-                const existingIds = new Set(videos.map((v) => v.video_id));
+                const allVids = await listRecords("videos");
+                const existingIds = new Set(allVids.map((v) => v.video_id));
                 const newVids = (feed.videos || [])
                   .filter((v) => !existingIds.has(v.video_id))
                   .map((v) => ({
@@ -231,7 +283,7 @@ function App() {
         {/* Smart Lists */}
         <div className="mt-4 pt-4 border-t border-neutral-800 space-y-1">
           <button
-            onClick={() => navigate("/liked")}
+            onClick={() => nav("liked")}
             className={`w-full text-left px-3 py-2 rounded text-sm cursor-pointer ${
               selectedChannel === "liked"
                 ? "bg-red-900/50 text-red-300 font-medium"
@@ -241,7 +293,7 @@ function App() {
             Liked ({videos.filter((v) => v.liked).length})
           </button>
           <button
-            onClick={() => navigate("/watch-later")}
+            onClick={() => nav("watch-later")}
             className={`w-full text-left px-3 py-2 rounded text-sm cursor-pointer ${
               selectedChannel === "watch_later"
                 ? "bg-blue-900/50 text-blue-300 font-medium"
@@ -251,7 +303,7 @@ function App() {
             Watch Later ({videos.filter((v) => v.watch_later).length})
           </button>
           <button
-            onClick={() => navigate("/notes")}
+            onClick={() => nav("notes")}
             className={`w-full text-left px-3 py-2 rounded text-sm cursor-pointer ${
               selectedChannel === "notes"
                 ? "bg-purple-900/50 text-purple-300 font-medium"
@@ -287,53 +339,25 @@ function App() {
 
       {/* Main content */}
       <div className="flex-1 p-6 overflow-y-auto bg-neutral-950">
-        <Routes>
-          <Route
-            path="/video/:videoId"
-            element={
-              <VideoPageWrapper
-                videos={videos}
-                loadVideos={loadVideos}
-              />
-            }
-          />
-          <Route
-            path="*"
-            element={
-              <>
-                {refreshing && (
-                  <div className="mb-4 text-sm text-neutral-400">Refreshing feeds...</div>
-                )}
-                <Feed
-                  videos={videos}
-                  selectedChannel={selectedChannel}
-                  onUpdated={loadVideos}
-                  onSelectVideo={(v) => navigate(`/video/${v.video_id}`)}
-                />
-              </>
-            }
-          />
-        </Routes>
+        {refreshing && (
+          <div className="mb-4 text-sm text-neutral-400">Refreshing feeds...</div>
+        )}
+        <Feed
+          videos={videos}
+          selectedChannel={selectedChannel}
+          onUpdated={loadVideos}
+          onSelectVideo={(v) => nav(`video/${v.video_id}`)}
+        />
+        {videos.length < videosTotal && (
+          <button
+            onClick={loadMoreVideos}
+            className="mt-4 w-full py-2 text-sm text-neutral-400 bg-neutral-900 rounded hover:bg-neutral-800"
+          >
+            Load more ({videos.length} of {videosTotal})
+          </button>
+        )}
       </div>
     </div>
-  );
-}
-
-function VideoPageWrapper({ videos, loadVideos }) {
-  const { videoId } = useParams();
-  const navigate = useNavigate();
-  const video = videos.find((v) => v.video_id === videoId);
-
-  if (!video) {
-    return <div className="text-neutral-400 text-sm">Video not found</div>;
-  }
-
-  return (
-    <VideoPage
-      video={video}
-      onBack={() => navigate(-1)}
-      onUpdated={loadVideos}
-    />
   );
 }
 
