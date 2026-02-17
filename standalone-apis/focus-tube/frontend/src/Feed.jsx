@@ -11,6 +11,8 @@ export default function Feed({ videos, selectedChannel, onUpdated, onSelectVideo
     filtered = filtered.filter((v) => v.watch_later);
   } else if (selectedChannel === "liked") {
     filtered = filtered.filter((v) => v.liked);
+  } else if (selectedChannel === "favorited") {
+    filtered = filtered.filter((v) => v.favorited);
   } else if (selectedChannel === "notes") {
     filtered = filtered.filter((v) => v.notes);
   } else if (selectedChannel) {

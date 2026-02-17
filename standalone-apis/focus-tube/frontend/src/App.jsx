@@ -165,6 +165,7 @@ function App() {
   let selectedChannel = null;
   if (page === "liked") selectedChannel = "liked";
   else if (page === "watch-later") selectedChannel = "watch_later";
+  else if (page === "favorites") selectedChannel = "favorited";
   else if (page === "notes") selectedChannel = "notes";
   else if (page.startsWith("channel/")) selectedChannel = page.slice("channel/".length);
 
@@ -325,6 +326,16 @@ function App() {
             }`}
           >
             Watch Later ({videos.filter((v) => v.watch_later).length})
+          </button>
+          <button
+            onClick={() => nav("favorites")}
+            className={`w-full text-left px-3 py-2 rounded text-sm cursor-pointer ${
+              selectedChannel === "favorited"
+                ? "bg-yellow-900/50 text-yellow-300 font-medium"
+                : "hover:bg-neutral-800 text-neutral-300"
+            }`}
+          >
+            Favorites ({videos.filter((v) => v.favorited).length})
           </button>
           <button
             onClick={() => nav("notes")}
