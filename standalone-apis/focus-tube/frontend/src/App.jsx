@@ -92,7 +92,7 @@ function App() {
         }
 
         if (newVideos.length > 0) {
-          await batchRecords("videos", newVideos);
+          await batchRecords("videos", newVideos, { dedupeOn: "video_id" });
         }
 
         await loadVideos();
@@ -143,7 +143,7 @@ function App() {
             }
           }
           if (newVideos.length > 0) {
-            await batchRecords("videos", newVideos);
+            await batchRecords("videos", newVideos, { dedupeOn: "video_id" });
             await loadVideos();
           }
           localStorage.setItem("last_refresh_date", todayStr());
@@ -234,7 +234,7 @@ function App() {
                     favorited: false,
                   }));
                 if (newVids.length > 0) {
-                  await batchRecords("videos", newVids);
+                  await batchRecords("videos", newVids, { dedupeOn: "video_id" });
                 }
                 await loadVideos();
               } finally {
@@ -269,7 +269,7 @@ function App() {
                   favorited: false,
                 }));
               for (let i = 0; i < newVids.length; i += 100) {
-                await batchRecords("videos", newVids.slice(i, i + 100));
+                await batchRecords("videos", newVids.slice(i, i + 100), { dedupeOn: "video_id" });
               }
               await loadVideos();
               alert(`Fetched ${result.total} total videos, ${newVids.length} new`);

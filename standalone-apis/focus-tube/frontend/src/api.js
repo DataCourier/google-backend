@@ -121,8 +121,9 @@ export async function deleteRecord(bucket, id) {
   return request(`/buckets/mine/${bucket}/${id}`, { method: "DELETE" });
 }
 
-export async function batchRecords(bucket, records) {
-  return request(`/buckets/mine/${bucket}/batch`, {
+export async function batchRecords(bucket, records, { dedupeOn } = {}) {
+  const qs = dedupeOn ? `?dedupe_on=${encodeURIComponent(dedupeOn)}` : "";
+  return request(`/buckets/mine/${bucket}/batch${qs}`, {
     method: "POST",
     body: JSON.stringify(records),
   });

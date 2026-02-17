@@ -190,7 +190,8 @@ func openBatchHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 			return
 		}
 
-		results, err := bucket.Batch(r.Context(), bucketName, records)
+		dedupeOn := r.URL.Query().Get("dedupe_on")
+		results, err := bucket.Batch(r.Context(), bucketName, records, dedupeOn)
 		if err != nil {
 			if strings.Contains(err.Error(), "unauthorized") {
 				respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})

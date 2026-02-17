@@ -44,11 +44,37 @@ async function seedData(page) {
   }
 }
 
+async function deleteAllVideos(page) {
+  const token = await getToken(page);
+  const videos = await page.evaluate(
+    async ({ apiBase, token }) => {
+      const resp = await fetch(`${apiBase}/buckets/mine/videos`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await resp.json();
+      return body.data || [];
+    },
+    { apiBase: API_BASE, token }
+  );
+  for (const v of videos) {
+    await page.evaluate(
+      async ({ apiBase, token, id }) => {
+        await fetch(`${apiBase}/buckets/mine/videos/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      },
+      { apiBase: API_BASE, token, id: v.id }
+    );
+  }
+}
+
 test.describe("Pagination", () => {
   test.beforeEach(async ({ page, baseURL }) => {
     await login(page, baseURL);
     // Prevent auto-refresh from interfering
     await page.evaluate(() => localStorage.setItem("last_refresh_date", new Date().toISOString().slice(0, 10)));
+    await deleteAllVideos(page);
     await seedData(page);
   });
 

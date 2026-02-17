@@ -227,13 +227,34 @@ type BatchResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func (b *PersonalBucketImpl) Batch(ctx context.Context, bucketName string, records []map[string]interface{}) ([]BatchResult, error) {
+func (b *PersonalBucketImpl) Batch(ctx context.Context, bucketName string, records []map[string]interface{}, dedupeOn string) ([]BatchResult, error) {
 	userID, ok := ctx.Value("user_id").(string)
 	if !ok || userID == "" {
 		return nil, errors.New("unauthorized")
 	}
 
 	collection := fmt.Sprintf("personal-%s", bucketName)
+
+	// Build a set of existing values for the dedupe field
+	var existingValues map[string]bool
+	if dedupeOn != "" {
+		existingValues = make(map[string]bool)
+		iter := b.client.Collection(collection).
+			Where("user_id", "==", userID).
+			Select(dedupeOn).
+			Documents(ctx)
+		defer iter.Stop()
+		for {
+			doc, err := iter.Next()
+			if err != nil {
+				break
+			}
+			if val, ok := doc.Data()[dedupeOn].(string); ok {
+				existingValues[val] = true
+			}
+		}
+	}
+
 	results := make([]BatchResult, len(records))
 
 	for i, record := range records {
@@ -241,6 +262,14 @@ func (b *PersonalBucketImpl) Batch(ctx context.Context, bucketName string, recor
 		if !hasID || id == "" {
 			id = uuid.New().String()
 			record["id"] = id
+		}
+
+		// Skip if dedupe field value already exists for this user
+		if dedupeOn != "" {
+			if val, ok := record[dedupeOn].(string); ok && existingValues[val] {
+				results[i] = BatchResult{ID: id, Status: "skipped"}
+				continue
+			}
 		}
 
 		doc, err := b.client.Collection(collection).Doc(id).Get(ctx)
@@ -267,6 +296,12 @@ func (b *PersonalBucketImpl) Batch(ctx context.Context, bucketName string, recor
 			results[i] = BatchResult{ID: id, Status: "updated"}
 		} else {
 			results[i] = BatchResult{ID: id, Status: "created"}
+			// Track newly created values for dedup within the same batch
+			if dedupeOn != "" {
+				if val, ok := record[dedupeOn].(string); ok {
+					existingValues[val] = true
+				}
+			}
 		}
 	}
 

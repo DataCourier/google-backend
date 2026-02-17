@@ -1,14 +1,21 @@
+import { useState } from "react";
 import { updateRecord } from "./api";
 
 export default function VideoCard({ video, onUpdated, onSelect }) {
+  const [busy, setBusy] = useState(null);
   const watched = !!video.watched;
   const liked = !!video.liked;
   const favorited = !!video.favorited;
   const watchLater = !!video.watch_later;
 
   async function toggle(field) {
-    await updateRecord("videos", video.id, { [field]: !video[field] });
-    onUpdated?.();
+    setBusy(field);
+    try {
+      await updateRecord("videos", video.id, { [field]: !video[field] });
+      onUpdated?.();
+    } finally {
+      setBusy(null);
+    }
   }
 
   const publishDate = video.published
@@ -54,43 +61,47 @@ export default function VideoCard({ video, onUpdated, onSelect }) {
         <div className="flex gap-2 mt-2">
           <button
             onClick={() => toggle("watched")}
-            className={`text-xs px-2 py-0.5 rounded ${
+            disabled={!!busy}
+            className={`text-xs px-2 py-0.5 rounded transition-opacity ${busy === "watched" ? "opacity-50" : ""} ${
               watched
                 ? "bg-green-900 text-green-300"
                 : "bg-neutral-800 text-neutral-400"
             }`}
           >
-            {watched ? "Watched" : "Unwatched"}
+            {busy === "watched" ? "..." : watched ? "Watched" : "Unwatched"}
           </button>
           <button
             onClick={() => toggle("liked")}
-            className={`text-xs px-2 py-0.5 rounded ${
+            disabled={!!busy}
+            className={`text-xs px-2 py-0.5 rounded transition-opacity ${busy === "liked" ? "opacity-50" : ""} ${
               liked
                 ? "bg-red-900 text-red-300"
                 : "bg-neutral-800 text-neutral-400"
             }`}
           >
-            {liked ? "Liked" : "Like"}
+            {busy === "liked" ? "..." : liked ? "Liked" : "Like"}
           </button>
           <button
             onClick={() => toggle("favorited")}
-            className={`text-xs px-2 py-0.5 rounded ${
+            disabled={!!busy}
+            className={`text-xs px-2 py-0.5 rounded transition-opacity ${busy === "favorited" ? "opacity-50" : ""} ${
               favorited
                 ? "bg-yellow-900 text-yellow-300"
                 : "bg-neutral-800 text-neutral-400"
             }`}
           >
-            {favorited ? "Favorited" : "Favorite"}
+            {busy === "favorited" ? "..." : favorited ? "Favorited" : "Favorite"}
           </button>
           <button
             onClick={() => toggle("watch_later")}
-            className={`text-xs px-2 py-0.5 rounded ${
+            disabled={!!busy}
+            className={`text-xs px-2 py-0.5 rounded transition-opacity ${busy === "watch_later" ? "opacity-50" : ""} ${
               watchLater
                 ? "bg-blue-900 text-blue-300"
                 : "bg-neutral-800 text-neutral-400"
             }`}
           >
-            {watchLater ? "In Queue" : "Watch Later"}
+            {busy === "watch_later" ? "..." : watchLater ? "In Queue" : "Watch Later"}
           </button>
         </div>
         {video.notes && (
