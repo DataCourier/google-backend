@@ -6,10 +6,10 @@ import { test, expect } from "@playwright/test";
 // - Vite dev server on :5173 (auto-started by playwright)
 
 test.describe("Auth flow", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+  test.beforeEach(async ({ page, baseURL }) => {
+    await page.goto(baseURL);
     await page.evaluate(() => localStorage.clear());
-    await page.goto("/");
+    await page.goto(baseURL);
     await page.waitForLoadState("networkidle");
   });
 

@@ -1,4 +1,4 @@
-.PHONY: setup sync deploy deploy-user deploy-game deploy-org deploy-stock test clean help emulator dev-game
+.PHONY: setup sync deploy deploy-user deploy-game deploy-org deploy-stock deploy-debug deploy-focus test clean help emulator dev-game
 
 # Load config
 PROJECT_NAME ?= my-app
@@ -18,7 +18,9 @@ help:
 	@echo "  make deploy-user - Deploy user-service only"
 	@echo "  make deploy-game - Deploy game-service only"
 	@echo "  make deploy-org  - Deploy org-service only"
-	@echo "  make deploy-stock- Deploy stock-prices service"
+	@echo "  make deploy-stock - Deploy stock-prices service"
+	@echo "  make deploy-debug - Deploy debug-logs service"
+	@echo "  make deploy-focus - Deploy focus-tube backend + frontend"
 	@echo ""
 	@echo "Other:"
 	@echo "  make test        - Run tests for all services"
@@ -72,6 +74,26 @@ deploy-stock:
 	@echo "Deploying stock-prices..."
 	@cd standalone-apis/stock-prices && \
 		gcloud run deploy stock-prices \
+		--source . \
+		--region $(GCP_REGION) \
+		--allow-unauthenticated \
+		--platform managed \
+		--quiet
+
+deploy-focus:
+	@echo "Deploying focus-tube..."
+	@cd standalone-apis/focus-tube && \
+		gcloud run deploy focus-tube \
+		--source . \
+		--region $(GCP_REGION) \
+		--allow-unauthenticated \
+		--platform managed \
+		--quiet
+
+deploy-debug:
+	@echo "Deploying debug-logs..."
+	@cd standalone-apis/debug-logs && \
+		gcloud run deploy debug-logs \
 		--source . \
 		--region $(GCP_REGION) \
 		--allow-unauthenticated \

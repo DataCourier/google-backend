@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -33,6 +34,7 @@ func requestCodeHandler(service *AuthService) http.HandlerFunc {
 
 		ac, err := service.CreateAuthCode(r.Context(), req.Email)
 		if err != nil {
+			log.Printf("CreateAuthCode error: %v", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create code"})
 			return
 		}

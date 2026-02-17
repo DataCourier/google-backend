@@ -42,7 +42,9 @@ func loadEnvFile(path string) {
 }
 
 func main() {
-	loadEnvFile(".env")
+	if os.Getenv("ENV") != "production" {
+		loadEnvFile(".env")
+	}
 	ctx := context.Background()
 
 	if os.Getenv("ENV") != "production" && os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
