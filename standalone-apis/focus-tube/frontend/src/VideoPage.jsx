@@ -1,5 +1,58 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { updateRecord } from "./api";
+
+const POSITION_KEY = "yt-positions";
+const MAX_HISTORY = 50;
+
+function loadPositions() {
+  try {
+    return JSON.parse(localStorage.getItem(POSITION_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function savePosition(videoId, time) {
+  const positions = loadPositions();
+  positions[videoId] = { time, ts: Date.now() };
+  // Keep only last 50 entries by recency
+  const entries = Object.entries(positions);
+  if (entries.length > MAX_HISTORY) {
+    entries.sort((a, b) => b[1].ts - a[1].ts);
+    const trimmed = Object.fromEntries(entries.slice(0, MAX_HISTORY));
+    localStorage.setItem(POSITION_KEY, JSON.stringify(trimmed));
+  } else {
+    localStorage.setItem(POSITION_KEY, JSON.stringify(positions));
+  }
+}
+
+function getSavedPosition(videoId) {
+  return loadPositions()[videoId]?.time || 0;
+}
+
+// Load YT IFrame API once globally
+let ytApiReady = false;
+let ytApiCallbacks = [];
+function ensureYTApi() {
+  if (ytApiReady) return Promise.resolve();
+  if (window.YT?.Player) {
+    ytApiReady = true;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    ytApiCallbacks.push(resolve);
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+      window.onYouTubeIframeAPIReady = () => {
+        ytApiReady = true;
+        ytApiCallbacks.forEach((cb) => cb());
+        ytApiCallbacks = [];
+      };
+    }
+  });
+}
 
 export default function VideoPage({ video, onBack, onUpdated }) {
   const [notes, setNotes] = useState(video.notes || "");
@@ -7,6 +60,10 @@ export default function VideoPage({ video, onBack, onUpdated }) {
   const timerRef = useRef(null);
   const lastSavedRef = useRef(video.notes || "");
   const versionRef = useRef(video.version || 0);
+  const [progress, setProgress] = useState(0);
+  const playerRef = useRef(null);
+  const positionIntervalRef = useRef(null);
+  const containerRef = useRef(null);
 
   // Reset notes when video changes
   useEffect(() => {
@@ -14,6 +71,56 @@ export default function VideoPage({ video, onBack, onUpdated }) {
     lastSavedRef.current = video.notes || "";
     versionRef.current = video.version || 0;
   }, [video.id]);
+
+  // YouTube player with position tracking
+  useEffect(() => {
+    let destroyed = false;
+
+    ensureYTApi().then(() => {
+      if (destroyed) return;
+      const startAt = getSavedPosition(video.video_id);
+      playerRef.current = new window.YT.Player(containerRef.current, {
+        videoId: video.video_id,
+        playerVars: { autoplay: 0 },
+        events: {
+          onReady: () => {
+            if (startAt > 30) {
+              playerRef.current.mute();
+              playerRef.current.seekTo(startAt, true);
+              playerRef.current.playVideo();
+              setTimeout(() => {
+                if (playerRef.current) {
+                  playerRef.current.pauseVideo();
+                  playerRef.current.unMute();
+                }
+              }, 1000);
+            }
+            // Save position every 10s, update progress every 1s
+            positionIntervalRef.current = setInterval(() => {
+              const p = playerRef.current;
+              if (!p?.getCurrentTime || !p?.getDuration) return;
+              const t = p.getCurrentTime();
+              const d = p.getDuration();
+              if (d > 0) setProgress(t / d);
+              if (t > 0 && Math.round(t) % 10 === 0) savePosition(video.video_id, t);
+            }, 1000);
+          },
+        },
+      });
+    });
+
+    return () => {
+      destroyed = true;
+      clearInterval(positionIntervalRef.current);
+      // Save final position on unmount
+      if (playerRef.current?.getCurrentTime) {
+        const t = playerRef.current.getCurrentTime();
+        if (t > 0) savePosition(video.video_id, t);
+      }
+      playerRef.current?.destroy?.();
+      playerRef.current = null;
+    };
+  }, [video.video_id]);
 
   // Auto-save with 2s debounce
   useEffect(() => {
@@ -71,13 +178,13 @@ export default function VideoPage({ video, onBack, onUpdated }) {
         Back to feed
       </button>
 
-      <div className="aspect-video w-full mb-4">
-        <iframe
-          src={`https://www.youtube.com/embed/${video.video_id}`}
-          title={video.title}
-          className="w-full h-full rounded-lg"
-          allowFullScreen
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      <div className="aspect-video w-full mb-1">
+        <div ref={containerRef} className="w-full h-full rounded-lg" />
+      </div>
+      <div className="w-full h-1 bg-neutral-800 rounded-full mb-4 overflow-hidden">
+        <div
+          className="h-full bg-red-600 transition-all duration-1000 ease-linear"
+          style={{ width: `${Math.min(progress * 100, 100)}%` }}
         />
       </div>
 
