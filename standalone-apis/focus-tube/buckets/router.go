@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/firestore"
@@ -32,16 +33,45 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 }
 
 func openListHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
+	paginationKeys := map[string]bool{"limit": true, "offset": true, "order_by": true, "order_dir": true}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		bucketName := chi.URLParam(r, "bucket")
 		filters := make(map[string]interface{})
+		var opts *ListOptions
+
 		for key, values := range r.URL.Query() {
-			if len(values) > 0 {
+			if len(values) == 0 {
+				continue
+			}
+			if paginationKeys[key] {
+				if opts == nil {
+					opts = &ListOptions{}
+				}
+				switch key {
+				case "limit":
+					if v, err := strconv.Atoi(values[0]); err == nil {
+						opts.Limit = v
+					}
+				case "offset":
+					if v, err := strconv.Atoi(values[0]); err == nil {
+						opts.Offset = v
+					}
+				case "order_by":
+					opts.OrderBy = values[0]
+				case "order_dir":
+					if values[0] == "desc" {
+						opts.OrderDir = firestore.Desc
+					} else {
+						opts.OrderDir = firestore.Asc
+					}
+				}
+			} else {
 				filters[key] = values[0]
 			}
 		}
 
-		items, err := bucket.List(r.Context(), bucketName, filters)
+		result, err := bucket.List(r.Context(), bucketName, filters, opts)
 		if err != nil {
 			if strings.Contains(err.Error(), "unauthorized") {
 				respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -51,7 +81,7 @@ func openListHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, map[string]interface{}{"data": items})
+		respondJSON(w, http.StatusOK, map[string]interface{}{"data": result.Data, "total": result.Total})
 	}
 }
 
@@ -116,6 +146,8 @@ func openUpdateHandler(bucket *PersonalBucketImpl) http.HandlerFunc {
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "forbidden") {
 				status = http.StatusForbidden
+			} else if strings.Contains(err.Error(), "conflict") {
+				status = http.StatusConflict
 			}
 			respondJSON(w, status, map[string]string{"error": err.Error()})
 			return

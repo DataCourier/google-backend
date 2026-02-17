@@ -48,7 +48,9 @@ async function request(url, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || res.statusText);
+    const err = new Error(body.error || res.statusText);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -86,8 +88,18 @@ export async function logout() {
   clearToken();
 }
 
-export async function listRecords(bucket) {
-  const res = await request(`/buckets/mine/${bucket}`);
+export async function listRecords(bucket, opts = {}) {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", opts.limit);
+  if (opts.offset) params.set("offset", opts.offset);
+  if (opts.orderBy) params.set("order_by", opts.orderBy);
+  if (opts.orderDir) params.set("order_dir", opts.orderDir);
+  const qs = params.toString();
+  const url = `/buckets/mine/${bucket}${qs ? `?${qs}` : ""}`;
+  const res = await request(url);
+  if (opts.limit || opts.offset) {
+    return { data: res.data || [], total: res.total || 0 };
+  }
   return res.data || [];
 }
 

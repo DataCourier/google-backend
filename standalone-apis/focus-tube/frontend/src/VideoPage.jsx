@@ -6,14 +6,16 @@ export default function VideoPage({ video, onBack, onUpdated }) {
   const [saveStatus, setSaveStatus] = useState("");
   const timerRef = useRef(null);
   const lastSavedRef = useRef(video.notes || "");
+  const versionRef = useRef(video.version || 0);
 
   // Reset notes when video changes
   useEffect(() => {
     setNotes(video.notes || "");
     lastSavedRef.current = video.notes || "";
+    versionRef.current = video.version || 0;
   }, [video.id]);
 
-  // Auto-save with debounce
+  // Auto-save with 2s debounce
   useEffect(() => {
     if (notes === lastSavedRef.current) return;
 
@@ -22,15 +24,23 @@ export default function VideoPage({ video, onBack, onUpdated }) {
     timerRef.current = setTimeout(async () => {
       setSaveStatus("saving...");
       try {
-        await updateRecord("videos", video.id, { notes });
+        const res = await updateRecord("videos", video.id, {
+          notes,
+          version: versionRef.current,
+        });
         lastSavedRef.current = notes;
+        versionRef.current = res.data?.version ?? versionRef.current + 1;
         setSaveStatus("saved");
         onUpdated?.();
-        setTimeout(() => setSaveStatus((s) => s === "saved" ? "" : s), 2000);
-      } catch {
-        setSaveStatus("failed to save");
+        setTimeout(() => setSaveStatus((s) => (s === "saved" ? "" : s)), 2000);
+      } catch (err) {
+        if (err.status === 409) {
+          setSaveStatus("conflict - reload to see latest");
+        } else {
+          setSaveStatus("failed to save");
+        }
       }
-    }, 1000);
+    }, 2000);
 
     return () => clearTimeout(timerRef.current);
   }, [notes, video.id]);
@@ -133,6 +143,7 @@ export default function VideoPage({ video, onBack, onUpdated }) {
           {saveStatus && (
             <span className={`text-xs ${
               saveStatus === "saved" ? "text-green-500" :
+              saveStatus.startsWith("conflict") ? "text-orange-400" :
               saveStatus === "failed to save" ? "text-red-400" :
               "text-neutral-500"
             }`}>

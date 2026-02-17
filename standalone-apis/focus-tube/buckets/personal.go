@@ -95,8 +95,30 @@ func (b *PersonalBucketImpl) Update(ctx context.Context, bucketName string, id s
 	data["created_at"] = existingData["created_at"]
 	data["updated_at"] = time.Now()
 
+	// Optimistic locking: if client sends a version, it must match
+	if clientVersion, ok := data["version"]; ok {
+		serverVersion, _ := toInt64(existingData["version"])
+		cv, cvOk := toInt64(clientVersion)
+		if cvOk && cv != serverVersion {
+			return fmt.Errorf("conflict: record was modified (server version %d, your version %d)", serverVersion, cv)
+		}
+		data["version"] = serverVersion + 1
+	}
+
 	_, err = b.client.Collection(collection).Doc(id).Set(ctx, data)
 	return err
+}
+
+func toInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	case int:
+		return int64(n), true
+	}
+	return 0, false
 }
 
 func (b *PersonalBucketImpl) Delete(ctx context.Context, bucketName string, id string) error {
@@ -124,7 +146,19 @@ func (b *PersonalBucketImpl) Delete(ctx context.Context, bucketName string, id s
 	return err
 }
 
-func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filters ...map[string]interface{}) ([]map[string]interface{}, error) {
+type ListOptions struct {
+	OrderBy  string
+	OrderDir firestore.Direction
+	Limit    int
+	Offset   int
+}
+
+type ListResult struct {
+	Data  []map[string]interface{} `json:"data"`
+	Total int                      `json:"total"`
+}
+
+func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filters map[string]interface{}, opts *ListOptions) (*ListResult, error) {
 	userID, ok := ctx.Value("user_id").(string)
 	if !ok || userID == "" {
 		return nil, errors.New("unauthorized")
@@ -133,8 +167,8 @@ func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filter
 	collection := fmt.Sprintf("personal-%s", bucketName)
 	query := b.client.Collection(collection).Where("user_id", "==", userID)
 
-	if len(filters) > 0 && filters[0] != nil {
-		for key, value := range filters[0] {
+	if filters != nil {
+		for key, value := range filters {
 			if key == "user_id" {
 				continue
 			}
@@ -142,7 +176,21 @@ func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filter
 		}
 	}
 
-	iter := query.Documents(ctx)
+	// Apply ordering and pagination
+	paginatedQuery := query
+	if opts != nil {
+		if opts.OrderBy != "" {
+			paginatedQuery = paginatedQuery.OrderBy(opts.OrderBy, opts.OrderDir)
+		}
+		if opts.Offset > 0 {
+			paginatedQuery = paginatedQuery.Offset(opts.Offset)
+		}
+		if opts.Limit > 0 {
+			paginatedQuery = paginatedQuery.Limit(opts.Limit)
+		}
+	}
+
+	iter := paginatedQuery.Documents(ctx)
 	defer iter.Stop()
 
 	var results []map[string]interface{}
@@ -154,7 +202,23 @@ func (b *PersonalBucketImpl) List(ctx context.Context, bucketName string, filter
 		results = append(results, doc.Data())
 	}
 
-	return results, nil
+	// Count total: if no pagination was applied, total is just len(results).
+	// Otherwise, run a separate count query.
+	total := len(results)
+	if opts != nil && (opts.Limit > 0 || opts.Offset > 0) {
+		countIter := query.Select().Documents(ctx)
+		defer countIter.Stop()
+		total = 0
+		for {
+			_, err := countIter.Next()
+			if err != nil {
+				break
+			}
+			total++
+		}
+	}
+
+	return &ListResult{Data: results, Total: total}, nil
 }
 
 type BatchResult struct {
