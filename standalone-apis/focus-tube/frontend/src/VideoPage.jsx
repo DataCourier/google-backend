@@ -155,7 +155,7 @@ export default function VideoPage({ video, onBack, onUpdated }) {
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Add notes about this video..."
-          className="mt-1 w-full h-32 p-3 text-sm bg-neutral-900 border border-neutral-700 text-neutral-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent placeholder-neutral-500"
+          className="mt-1 w-full h-[48rem] p-3 text-base font-mono bg-neutral-900 border border-neutral-700 text-neutral-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent placeholder-neutral-500"
         />
       </div>
     </div>

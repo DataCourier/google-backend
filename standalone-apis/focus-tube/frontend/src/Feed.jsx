@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import VideoCard from "./VideoCard";
 
-export default function Feed({ videos, selectedChannel, onUpdated, onSelectVideo }) {
+export default function Feed({ videos, selectedChannel, onUpdated, onSelectVideo, scrollToVideoId, onScrolled }) {
   const [filter, setFilter] = useState("all");
   const [hideShorts, setHideShorts] = useState(true);
 
@@ -33,6 +33,17 @@ export default function Feed({ videos, selectedChannel, onUpdated, onSelectVideo
   filtered = [...filtered].sort(
     (a, b) => new Date(b.published || 0) - new Date(a.published || 0)
   );
+
+  useEffect(() => {
+    if (!scrollToVideoId) return;
+    const el = document.querySelector(`[data-video-id="${scrollToVideoId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("bg-neutral-800");
+      setTimeout(() => el.classList.remove("bg-neutral-800"), 2000);
+    }
+    onScrolled?.();
+  }, [scrollToVideoId]);
 
   return (
     <div>

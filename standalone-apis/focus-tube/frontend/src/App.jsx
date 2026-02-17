@@ -19,6 +19,7 @@ function App() {
   const [videos, setVideos] = useState([]);
   const [videosTotal, setVideosTotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [scrollToVideoId, setScrollToVideoId] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const page = searchParams.get("p") || "";
@@ -191,7 +192,10 @@ function App() {
         <div className="flex-1 p-6 overflow-y-auto">
           <VideoPage
             video={video}
-            onBack={() => window.history.back()}
+            onBack={() => {
+              setScrollToVideoId(videoId);
+              window.history.back();
+            }}
             onUpdated={loadVideos}
           />
         </div>
@@ -347,6 +351,8 @@ function App() {
           selectedChannel={selectedChannel}
           onUpdated={loadVideos}
           onSelectVideo={(v) => nav(`video/${v.video_id}`)}
+          scrollToVideoId={scrollToVideoId}
+          onScrolled={() => setScrollToVideoId(null)}
         />
         {videos.length < videosTotal && (
           <button

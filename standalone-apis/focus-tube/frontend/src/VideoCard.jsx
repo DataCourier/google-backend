@@ -23,7 +23,7 @@ export default function VideoCard({ video, onUpdated, onSelect }) {
     : "";
 
   return (
-    <div className="flex gap-3 p-3 rounded-lg border border-neutral-800 hover:border-neutral-600">
+    <div data-video-id={video.video_id} className="flex gap-3 p-3 rounded-lg border border-neutral-800 hover:border-neutral-600 transition-colors duration-700">
       <div
         className="shrink-0 cursor-pointer"
         onClick={() => onSelect?.(video)}
