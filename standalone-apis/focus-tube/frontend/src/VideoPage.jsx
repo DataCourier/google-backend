@@ -1,9 +1,39 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { updateRecord } from "./api";
 
 export default function VideoPage({ video, onBack, onUpdated }) {
   const [notes, setNotes] = useState(video.notes || "");
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+  const timerRef = useRef(null);
+  const lastSavedRef = useRef(video.notes || "");
+
+  // Reset notes when video changes
+  useEffect(() => {
+    setNotes(video.notes || "");
+    lastSavedRef.current = video.notes || "";
+  }, [video.id]);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (notes === lastSavedRef.current) return;
+
+    setSaveStatus("unsaved");
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      setSaveStatus("saving...");
+      try {
+        await updateRecord("videos", video.id, { notes });
+        lastSavedRef.current = notes;
+        setSaveStatus("saved");
+        onUpdated?.();
+        setTimeout(() => setSaveStatus((s) => s === "saved" ? "" : s), 2000);
+      } catch {
+        setSaveStatus("failed to save");
+      }
+    }, 1000);
+
+    return () => clearTimeout(timerRef.current);
+  }, [notes, video.id]);
 
   const watched = !!video.watched;
   const liked = !!video.liked;
@@ -13,17 +43,6 @@ export default function VideoPage({ video, onBack, onUpdated }) {
   async function toggle(field) {
     await updateRecord("videos", video.id, { [field]: !video[field] });
     onUpdated?.();
-  }
-
-  async function saveNotes() {
-    if (notes === (video.notes || "")) return;
-    setSaving(true);
-    try {
-      await updateRecord("videos", video.id, { notes });
-      onUpdated?.();
-    } finally {
-      setSaving(false);
-    }
   }
 
   const publishDate = video.published
@@ -109,15 +128,24 @@ export default function VideoPage({ video, onBack, onUpdated }) {
       </div>
 
       <div className="mt-4">
-        <label className="text-sm font-medium text-neutral-300">Notes</label>
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-neutral-300">Notes</label>
+          {saveStatus && (
+            <span className={`text-xs ${
+              saveStatus === "saved" ? "text-green-500" :
+              saveStatus === "failed to save" ? "text-red-400" :
+              "text-neutral-500"
+            }`}>
+              {saveStatus}
+            </span>
+          )}
+        </div>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={saveNotes}
           placeholder="Add notes about this video..."
           className="mt-1 w-full h-32 p-3 text-sm bg-neutral-900 border border-neutral-700 text-neutral-100 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent placeholder-neutral-500"
         />
-        {saving && <p className="text-xs text-neutral-500 mt-1">Saving...</p>}
       </div>
     </div>
   );

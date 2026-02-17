@@ -93,6 +93,11 @@ export default function VideoCard({ video, onUpdated, onSelect }) {
             {watchLater ? "In Queue" : "Watch Later"}
           </button>
         </div>
+        {video.notes && (
+          <p className="text-xs text-purple-300/70 mt-1 line-clamp-2 italic">
+            {video.notes}
+          </p>
+        )}
       </div>
     </div>
   );

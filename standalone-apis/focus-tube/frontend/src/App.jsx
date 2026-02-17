@@ -5,7 +5,7 @@ import ChannelList from "./ChannelList";
 import Feed from "./Feed";
 import VideoPage from "./VideoPage";
 import LoginPage from "./LoginPage";
-import { listRecords, fetchRSS, fetchAllVideos, batchRecords, isLoggedIn, logout, setOnUnauthorized } from "./api";
+import { listRecords, fetchRSS, fetchAllVideos, batchRecords, isLoggedIn, logout, setOnUnauthorized, getEmail } from "./api";
 import { v4 as uuidv4 } from "uuid";
 
 function App() {
@@ -136,6 +136,7 @@ function App() {
   let selectedChannel = null;
   if (path === "/liked") selectedChannel = "liked";
   else if (path === "/watch-later") selectedChannel = "watch_later";
+  else if (path === "/notes") selectedChannel = "notes";
   else if (path.startsWith("/channel/")) selectedChannel = path.slice("/channel/".length);
 
   function handleSelectChannel(channelId) {
@@ -249,6 +250,16 @@ function App() {
           >
             Watch Later ({videos.filter((v) => v.watch_later).length})
           </button>
+          <button
+            onClick={() => navigate("/notes")}
+            className={`w-full text-left px-3 py-2 rounded text-sm cursor-pointer ${
+              selectedChannel === "notes"
+                ? "bg-purple-900/50 text-purple-300 font-medium"
+                : "hover:bg-neutral-800 text-neutral-300"
+            }`}
+          >
+            Notes ({videos.filter((v) => v.notes).length})
+          </button>
         </div>
 
         <div className="mt-auto pt-4 space-y-2">
@@ -259,15 +270,18 @@ function App() {
           >
             {refreshing ? "Refreshing..." : "Refresh feeds"}
           </button>
-          <button
-            onClick={async () => {
-              await logout();
-              setLoggedIn(false);
-            }}
-            className="w-full text-xs px-3 py-2 text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 rounded"
-          >
-            Logout
-          </button>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-neutral-500 truncate">{getEmail()}</span>
+            <button
+              onClick={async () => {
+                await logout();
+                setLoggedIn(false);
+              }}
+              className="text-xs text-neutral-500 hover:text-neutral-300 shrink-0"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 

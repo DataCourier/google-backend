@@ -8,8 +8,17 @@ export function setToken(token) {
   localStorage.setItem("token", token);
 }
 
+export function setEmail(email) {
+  localStorage.setItem("user_email", email);
+}
+
+export function getEmail() {
+  return localStorage.getItem("user_email") || "";
+}
+
 export function clearToken() {
   localStorage.removeItem("token");
+  localStorage.removeItem("user_email");
 }
 
 export function isLoggedIn() {
