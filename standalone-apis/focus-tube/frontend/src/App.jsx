@@ -20,6 +20,8 @@ function App() {
   const [videosTotal, setVideosTotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [scrollToVideoId, setScrollToVideoId] = useState(null);
+  const [singleVideo, setSingleVideo] = useState(null);
+  const [singleVideoLoading, setSingleVideoLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const page = searchParams.get("p") || "";
@@ -172,18 +174,37 @@ function App() {
     else nav(`channel/${channelId}`);
   }
 
+  useEffect(() => {
+    if (!page.startsWith("video/")) {
+      setSingleVideo(null);
+      return;
+    }
+    const videoId = page.slice("video/".length);
+    const found = videos.find((v) => v.video_id === videoId);
+    if (found) {
+      setSingleVideo(found);
+    } else {
+      setSingleVideoLoading(true);
+      listRecords("videos", { limit: 1, filters: { video_id: videoId } })
+        .then((res) => {
+          setSingleVideo(res.data?.[0] || null);
+          setSingleVideoLoading(false);
+        })
+        .catch(() => setSingleVideoLoading(false));
+    }
+  }, [page, videos]);
+
   if (!loggedIn) {
     return <LoginPage onLogin={() => setLoggedIn(true)} />;
   }
 
-  // Video page
   if (page.startsWith("video/")) {
     const videoId = page.slice("video/".length);
-    const video = videos.find((v) => v.video_id === videoId);
+    const video = videos.find((v) => v.video_id === videoId) || singleVideo;
     if (!video) {
       return (
         <div className="flex h-screen bg-neutral-950 text-neutral-100 items-center justify-center">
-          <div className="text-neutral-400 text-sm">Video not found</div>
+          <div className="text-neutral-400 text-sm">{singleVideoLoading ? "Loading..." : "Video not found"}</div>
         </div>
       );
     }

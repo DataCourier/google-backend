@@ -94,6 +94,11 @@ export async function listRecords(bucket, opts = {}) {
   if (opts.offset) params.set("offset", opts.offset);
   if (opts.orderBy) params.set("order_by", opts.orderBy);
   if (opts.orderDir) params.set("order_dir", opts.orderDir);
+  if (opts.filters) {
+    for (const [k, v] of Object.entries(opts.filters)) {
+      params.set(k, v);
+    }
+  }
   const qs = params.toString();
   const url = `/buckets/mine/${bucket}${qs ? `?${qs}` : ""}`;
   const res = await request(url);
