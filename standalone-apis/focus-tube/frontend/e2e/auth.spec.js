@@ -26,10 +26,20 @@ test.describe("Auth flow", () => {
     // Should auto-verify and land on main app
     await expect(page.getByRole("button", { name: "Logout" })).toBeVisible({ timeout: 5000 });
 
-    // Token should be stored
+    // Token and email should be stored
     const token = await page.evaluate(() => localStorage.getItem("token"));
     expect(token).toBeTruthy();
     expect(token.length).toBeGreaterThan(10);
+
+    const email = await page.evaluate(() => localStorage.getItem("user_email"));
+    expect(email).toBe("e2e-test@example.com");
+
+    // Email should be visible in the sidebar
+    await expect(page.getByText("e2e-test@example.com")).toBeVisible();
+
+    // App should have loaded (not stuck on empty state from pre-login)
+    // "All channels" button confirms the main app rendered and init() ran
+    await expect(page.getByRole("button", { name: "All channels" })).toBeVisible();
   });
 
   test("session persists across page reload", async ({ page }) => {
@@ -42,9 +52,10 @@ test.describe("Auth flow", () => {
     await page.reload();
     await page.waitForLoadState("networkidle");
 
-    // Should still be logged in
+    // Should still be logged in with email visible
     await expect(page.getByRole("button", { name: "Logout" })).toBeVisible({ timeout: 5000 });
     await expect(page.getByRole("textbox", { name: "Email" })).not.toBeVisible();
+    await expect(page.getByText("e2e-persist@example.com")).toBeVisible();
   });
 
   test("logout returns to login page", async ({ page }) => {
@@ -59,9 +70,11 @@ test.describe("Auth flow", () => {
     // Should see login page
     await expect(page.getByRole("textbox", { name: "Email" })).toBeVisible({ timeout: 5000 });
 
-    // Token should be cleared
+    // Token and email should be cleared
     const token = await page.evaluate(() => localStorage.getItem("token"));
     expect(token).toBeNull();
+    const email = await page.evaluate(() => localStorage.getItem("user_email"));
+    expect(email).toBeNull();
   });
 
   test("invalid email stays on login page", async ({ page }) => {

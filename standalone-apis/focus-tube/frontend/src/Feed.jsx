@@ -34,6 +34,13 @@ export default function Feed({ videos, selectedChannel, onUpdated, onSelectVideo
     (a, b) => new Date(b.published || 0) - new Date(a.published || 0)
   );
 
+  // On homepage (no channel selected), show only the 100 most recent
+  const isHomepage = !selectedChannel;
+  const totalBeforeCap = filtered.length;
+  if (isHomepage && filtered.length > 100) {
+    filtered = filtered.slice(0, 100);
+  }
+
   useEffect(() => {
     if (!scrollToVideoId) return;
     const el = document.querySelector(`[data-video-id="${scrollToVideoId}"]`);
@@ -72,7 +79,9 @@ export default function Feed({ videos, selectedChannel, onUpdated, onSelectVideo
           {hideShorts ? "Show Shorts" : "Hiding Shorts"}
         </button>
         <span className="text-xs text-neutral-400 ml-auto self-center">
-          {filtered.length} videos
+          {isHomepage && totalBeforeCap > 100
+            ? `${filtered.length} of ${totalBeforeCap} videos`
+            : `${filtered.length} videos`}
         </span>
       </div>
       <div className="space-y-2">

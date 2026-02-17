@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { requestCode, verifyCode, setToken, setEmail } from "./api";
+import { requestCode, verifyCode, setToken, setEmail as saveEmail } from "./api";
 
 export default function LoginPage({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -35,7 +35,7 @@ export default function LoginPage({ onLogin }) {
     try {
       const res = await verifyCode(em, cd);
       setToken(res.token);
-      setEmail(res.email);
+      saveEmail(res.email);
       onLogin();
     } catch (err) {
       setError(err.message);

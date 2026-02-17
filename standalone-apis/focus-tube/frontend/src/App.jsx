@@ -40,26 +40,25 @@ function App() {
     return data || [];
   }, []);
 
-  const PAGE_SIZE = 100;
+  // TODO: Re-enable pagination when video count warrants it
+  // const PAGE_SIZE = 100;
+  // const loadVideos = useCallback(async (append = false, offset = 0) => {
+  //   const result = await listRecords("videos", {
+  //     limit: PAGE_SIZE, offset, orderBy: "published", orderDir: "desc",
+  //   });
+  //   if (append) setVideos((prev) => [...prev, ...result.data]);
+  //   else setVideos(result.data);
+  //   setVideosTotal(result.total);
+  // }, []);
+  // const loadMoreVideos = useCallback(async () => {
+  //   await loadVideos(true, videos.length);
+  // }, [loadVideos, videos.length]);
 
-  const loadVideos = useCallback(async (append = false, offset = 0) => {
-    const result = await listRecords("videos", {
-      limit: PAGE_SIZE,
-      offset,
-      orderBy: "published",
-      orderDir: "desc",
-    });
-    if (append) {
-      setVideos((prev) => [...prev, ...result.data]);
-    } else {
-      setVideos(result.data);
-    }
-    setVideosTotal(result.total);
+  const loadVideos = useCallback(async () => {
+    const data = await listRecords("videos");
+    setVideos(data || []);
+    setVideosTotal(data?.length || 0);
   }, []);
-
-  const loadMoreVideos = useCallback(async () => {
-    await loadVideos(true, videos.length);
-  }, [loadVideos, videos.length]);
 
   const refreshFeeds = useCallback(
     async (channelList) => {
@@ -375,6 +374,7 @@ function App() {
           scrollToVideoId={scrollToVideoId}
           onScrolled={() => setScrollToVideoId(null)}
         />
+        {/* TODO: Re-enable Load More when pagination is back
         {videos.length < videosTotal && (
           <button
             onClick={loadMoreVideos}
@@ -383,6 +383,7 @@ function App() {
             Load more ({videos.length} of {videosTotal})
           </button>
         )}
+        */}
       </div>
     </div>
   );
