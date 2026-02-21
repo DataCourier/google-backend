@@ -1,4 +1,6 @@
-# SafetyPulse — Passive Safety Monitoring Backend
+# QuietBeat (quietbeat.app) — Passive Safety Monitoring Backend
+
+> App name: **QuietBeat** (quietbeat.app). Backend service name remains `safety-pulse` in Cloud Run and codebase.
 
 A REST API that receives periodic pings from an iOS app and stores them for analysis. The app monitors phone activity signals (steps, battery, location) so family members can detect when an isolated person may be in trouble. Core principle: if the phone goes silent, something may be wrong.
 
@@ -338,6 +340,8 @@ This API must never fail and — more importantly — never fail silently. A mis
 - **Silent push**: Store APNs push tokens in beacon registration. Add `POST /push/{beacon_id}` to trigger a silent push. Determine optimal timing — send push when no ping received in X hours.
 - **Alerting**: Detect prolonged silence, notify guardians via push notification.
 - **Multiple guardians**: Flesh out invite flow for adding guardians (admin role) vs beacons (member role).
+- **Staging + prod rename**: Nuke the current `safety-pulse` Cloud Run service. Create two properly named services: `quietbeat-staging` and `quietbeat-prod`. Run e2e tests against staging before deploying to prod. Update `deploy.sh` and Makefile targets accordingly.
+- **Web join page**: Deploy a static HTML page to Cloudflare (custom domain) that lets a beacon join a family via a shared link instead of QR code scanning. Guardian sends grandma a URL like `https://quietbeat.app/join?token=abc123`, she opens it on her phone, taps join, done. Needs a lightweight web endpoint or the page calls `POST /family/join` directly with the token from the URL. Much simpler onboarding for non-technical users — no QR scanning, no app-to-app pairing.
 
 ## Build Steps
 
