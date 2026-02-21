@@ -1,4 +1,4 @@
-.PHONY: setup sync deploy deploy-user deploy-game deploy-org deploy-stock deploy-debug deploy-focus test clean help emulator dev-game
+.PHONY: setup sync deploy deploy-user deploy-game deploy-org deploy-stock deploy-debug deploy-focus deploy-safety test clean help emulator dev-game
 
 # Load config
 PROJECT_NAME ?= my-app
@@ -21,6 +21,7 @@ help:
 	@echo "  make deploy-stock - Deploy stock-prices service"
 	@echo "  make deploy-debug - Deploy debug-logs service"
 	@echo "  make deploy-focus - Deploy focus-tube backend + frontend"
+	@echo "  make deploy-safety - Deploy safety-pulse service"
 	@echo ""
 	@echo "Other:"
 	@echo "  make test        - Run tests for all services"
@@ -98,6 +99,17 @@ deploy-debug:
 		--region $(GCP_REGION) \
 		--allow-unauthenticated \
 		--platform managed \
+		--quiet
+
+deploy-safety:
+	@echo "Deploying safety-pulse..."
+	@cd standalone-apis/safety-pulse && \
+		gcloud run deploy safety-pulse \
+		--source . \
+		--region $(GCP_REGION) \
+		--allow-unauthenticated \
+		--platform managed \
+		--set-env-vars ENV=production,GCP_PROJECT=michal-playground-2026 \
 		--quiet
 
 test:
