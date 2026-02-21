@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
@@ -768,6 +769,131 @@ func TestBeaconDelete(t *testing.T) {
 	if resp.StatusCode != 404 {
 		t.Errorf("Expected 404 after delete, got %d", resp.StatusCode)
 	}
+}
+
+// End-to-end: full pairing + ping + dashboard flow
+func TestE2EFullFlow(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupCollections(ctx, client, "orgs", "org-members", "family-invites", "org-beacons", "org-pings")
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// 1. Guardian creates family
+	createResp := doRequest(server, "POST", "/family/",
+		map[string]interface{}{"family_name": "End-to-End Family"},
+		"guardian-token")
+	if createResp.StatusCode != 201 {
+		t.Fatalf("Create family failed: %d %v", createResp.StatusCode, createResp.Body)
+	}
+	inviteToken := createResp.Body["invite_token"].(string)
+	orgID := createResp.Body["org_id"].(string)
+	t.Logf("Family created: org_id=%s", orgID)
+
+	// 2. Beacon joins family
+	joinResp := doRequest(server, "POST", "/family/join",
+		map[string]interface{}{
+			"invite_token": inviteToken,
+			"device_name":  "Grandma's iPhone",
+			"device_model": "iPhone 15 Pro",
+			"os_version":   "18.2",
+		}, "beacon-token")
+	if joinResp.StatusCode != 200 {
+		t.Fatalf("Join family failed: %d %v", joinResp.StatusCode, joinResp.Body)
+	}
+	beaconID := joinResp.Body["beacon_id"].(string)
+	t.Logf("Beacon joined: beacon_id=%s", beaconID)
+
+	// 3. Beacon updates push token
+	resp := doRequest(server, "PUT", "/beacon/"+beaconID+"/",
+		map[string]interface{}{"push_token": "apns-abc123"},
+		"beacon-token")
+	if resp.StatusCode != 200 {
+		t.Fatalf("Update beacon failed: %d %v", resp.StatusCode, resp.Body)
+	}
+
+	// 4. Beacon sends multiple pings (simulating widget refresh, background refresh, location change)
+	pingSources := []struct {
+		source  string
+		battery int
+		steps   int
+		lat     float64
+		lng     float64
+	}{
+		{"widget_refresh", 95, 500, 51.5074, -0.1278},
+		{"background_refresh", 90, 1200, 51.5080, -0.1280},
+		{"location_change", 87, 2300, 51.5100, -0.1300},
+		{"widget_refresh", 82, 3456, 51.5120, -0.1320},
+	}
+
+	for _, p := range pingSources {
+		resp := doRequest(server, "POST", "/beacon/"+beaconID+"/ping",
+			map[string]interface{}{
+				"timestamp":      time.Now().UTC().Format(time.RFC3339),
+				"battery_level":  p.battery,
+				"charging_state": "unplugged",
+				"step_count":     p.steps,
+				"latitude":       p.lat,
+				"longitude":      p.lng,
+				"ping_source":    p.source,
+			}, "beacon-token")
+		if resp.StatusCode != 201 {
+			t.Fatalf("Ping failed: %d %v", resp.StatusCode, resp.Body)
+		}
+	}
+	t.Log("4 pings sent successfully")
+
+	// 5. Guardian checks family dashboard
+	statusResp := doRequest(server, "GET", "/family/", nil, "guardian-token")
+	if statusResp.StatusCode != 200 {
+		t.Fatalf("Family status failed: %d %v", statusResp.StatusCode, statusResp.Body)
+	}
+
+	if statusResp.Body["family_name"] != "End-to-End Family" {
+		t.Errorf("Expected family name 'End-to-End Family', got %v", statusResp.Body["family_name"])
+	}
+
+	beacons := statusResp.Body["beacons"].([]interface{})
+	if len(beacons) != 1 {
+		t.Fatalf("Expected 1 beacon, got %d", len(beacons))
+	}
+
+	beacon := beacons[0].(map[string]interface{})
+	if beacon["device_name"] != "Grandma's iPhone" {
+		t.Errorf("Expected device name 'Grandma's iPhone', got %v", beacon["device_name"])
+	}
+	// Should have latest ping data
+	if beacon["battery_level"] == nil {
+		t.Error("Expected battery_level in dashboard")
+	}
+	t.Logf("Dashboard shows beacon with battery=%v", beacon["battery_level"])
+
+	// 6. Guardian lists all pings for the beacon
+	pingsResp := doRequest(server, "GET", "/beacon/"+beaconID+"/pings", nil, "guardian-token")
+	if pingsResp.StatusCode != 200 {
+		t.Fatalf("List pings failed: %d %v", pingsResp.StatusCode, pingsResp.Body)
+	}
+	pingCount := pingsResp.Body["count"].(float64)
+	if pingCount != 4 {
+		t.Errorf("Expected 4 pings, got %v", pingCount)
+	}
+	t.Logf("Guardian can see all %v pings", pingCount)
+
+	// 7. Verify outsider cannot access anything
+	outsiderResp := doRequest(server, "GET", "/beacon/"+beaconID+"/pings", nil, "outsider-token")
+	if outsiderResp.StatusCode != 403 {
+		t.Errorf("Expected outsider blocked (403), got %d", outsiderResp.StatusCode)
+	}
+
+	// 8. Health check still works
+	healthResp := doRequest(server, "GET", "/health", nil, "")
+	if healthResp.StatusCode != 200 {
+		t.Errorf("Health check failed: %d", healthResp.StatusCode)
+	}
+
+	t.Log("E2E flow complete: create family -> join -> ping -> dashboard -> verify isolation")
 }
 
 func TestBeaconOutsiderBlocked(t *testing.T) {
