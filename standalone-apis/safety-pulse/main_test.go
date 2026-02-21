@@ -63,6 +63,7 @@ func setupTestRouter(client *firestore.Client) http.Handler {
 	}
 
 	buckets.RegisterOpenBucketRoutes(r, client, mockAuth)
+	registerFamilyRoutes(r, client, mockAuth)
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -310,5 +311,218 @@ func TestOrgNoAuthBlocked(t *testing.T) {
 	resp := doRequest(server, "GET", "/org/family-test/buckets/beacons/", nil, "")
 	if resp.StatusCode != 401 {
 		t.Errorf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+// Family endpoint tests
+
+func TestCreateFamily(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupCollections(ctx, client, "orgs", "org-members", "family-invites")
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	resp := doRequest(server, "POST", "/family/",
+		map[string]interface{}{"family_name": "The Smiths"},
+		"guardian-token")
+
+	if resp.StatusCode != 201 {
+		t.Fatalf("Expected 201, got %d: %v", resp.StatusCode, resp.Body)
+	}
+	if resp.Body["family_name"] != "The Smiths" {
+		t.Errorf("Expected family_name 'The Smiths', got %v", resp.Body["family_name"])
+	}
+	if resp.Body["org_id"] == nil || resp.Body["org_id"] == "" {
+		t.Error("Expected org_id to be set")
+	}
+	if resp.Body["invite_token"] == nil || resp.Body["invite_token"] == "" {
+		t.Error("Expected invite_token to be set")
+	}
+}
+
+func TestCreateFamilyNoName(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	resp := doRequest(server, "POST", "/family/",
+		map[string]interface{}{},
+		"guardian-token")
+
+	if resp.StatusCode != 400 {
+		t.Errorf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestJoinFamily(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupCollections(ctx, client, "orgs", "org-members", "family-invites", "org-beacons")
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Guardian creates family
+	createResp := doRequest(server, "POST", "/family/",
+		map[string]interface{}{"family_name": "The Smiths"},
+		"guardian-token")
+
+	if createResp.StatusCode != 201 {
+		t.Fatalf("Failed to create family: %d %v", createResp.StatusCode, createResp.Body)
+	}
+
+	inviteToken := createResp.Body["invite_token"].(string)
+	orgID := createResp.Body["org_id"].(string)
+
+	// Beacon joins with invite token
+	joinResp := doRequest(server, "POST", "/family/join",
+		map[string]interface{}{
+			"invite_token": inviteToken,
+			"device_name":  "Grandma's iPhone",
+			"device_model": "iPhone 15",
+			"os_version":   "18.2",
+		}, "beacon-token")
+
+	if joinResp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d: %v", joinResp.StatusCode, joinResp.Body)
+	}
+	if joinResp.Body["org_id"] != orgID {
+		t.Errorf("Expected org_id %s, got %v", orgID, joinResp.Body["org_id"])
+	}
+	if joinResp.Body["beacon_id"] == nil || joinResp.Body["beacon_id"] == "" {
+		t.Error("Expected beacon_id to be set")
+	}
+	if joinResp.Body["family_name"] != "The Smiths" {
+		t.Errorf("Expected family_name 'The Smiths', got %v", joinResp.Body["family_name"])
+	}
+}
+
+func TestJoinFamilyInvalidToken(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	resp := doRequest(server, "POST", "/family/join",
+		map[string]interface{}{
+			"invite_token": "bogus-token",
+			"device_name":  "Test",
+		}, "beacon-token")
+
+	if resp.StatusCode != 404 {
+		t.Errorf("Expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestJoinFamilyDuplicate(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupCollections(ctx, client, "orgs", "org-members", "family-invites", "org-beacons")
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create family and join once
+	createResp := doRequest(server, "POST", "/family/",
+		map[string]interface{}{"family_name": "Test Family"},
+		"guardian-token")
+	inviteToken := createResp.Body["invite_token"].(string)
+
+	doRequest(server, "POST", "/family/join",
+		map[string]interface{}{"invite_token": inviteToken, "device_name": "Phone"},
+		"beacon-token")
+
+	// Try to join again — should get conflict
+	resp := doRequest(server, "POST", "/family/join",
+		map[string]interface{}{"invite_token": inviteToken, "device_name": "Phone"},
+		"beacon-token")
+
+	if resp.StatusCode != 409 {
+		t.Errorf("Expected 409 conflict, got %d", resp.StatusCode)
+	}
+}
+
+func TestFamilyStatusAfterJoin(t *testing.T) {
+	ctx := context.Background()
+	client := setupTestFirestore(t)
+	defer client.Close()
+	defer cleanupCollections(ctx, client, "orgs", "org-members", "family-invites", "org-beacons", "org-pings")
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	// Create family
+	createResp := doRequest(server, "POST", "/family/",
+		map[string]interface{}{"family_name": "The Smiths"},
+		"guardian-token")
+	inviteToken := createResp.Body["invite_token"].(string)
+
+	// Beacon joins
+	joinResp := doRequest(server, "POST", "/family/join",
+		map[string]interface{}{
+			"invite_token": inviteToken,
+			"device_name":  "Grandma's iPhone",
+			"device_model": "iPhone 15",
+		}, "beacon-token")
+	beaconID := joinResp.Body["beacon_id"].(string)
+	orgID := joinResp.Body["org_id"].(string)
+
+	// Beacon sends a ping via org bucket
+	doRequest(server, "POST", "/org/"+orgID+"/buckets/pings/",
+		map[string]interface{}{
+			"id":             "ping-1",
+			"beacon_id":      beaconID,
+			"battery_level":  85,
+			"charging_state": "charging",
+			"step_count":     1234,
+			"latitude":       51.5,
+			"longitude":      -0.1,
+			"ping_source":    "widget_refresh",
+		}, "beacon-token")
+
+	// Guardian checks family status
+	statusResp := doRequest(server, "GET", "/family/", nil, "guardian-token")
+
+	if statusResp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d: %v", statusResp.StatusCode, statusResp.Body)
+	}
+	if statusResp.Body["family_name"] != "The Smiths" {
+		t.Errorf("Expected family_name 'The Smiths', got %v", statusResp.Body["family_name"])
+	}
+
+	beacons := statusResp.Body["beacons"].([]interface{})
+	if len(beacons) != 1 {
+		t.Fatalf("Expected 1 beacon, got %d", len(beacons))
+	}
+
+	beacon := beacons[0].(map[string]interface{})
+	if beacon["device_name"] != "Grandma's iPhone" {
+		t.Errorf("Expected device_name 'Grandma's iPhone', got %v", beacon["device_name"])
+	}
+
+	// Should have latest ping data merged in
+	if beacon["battery_level"] != float64(85) {
+		t.Errorf("Expected battery_level 85, got %v", beacon["battery_level"])
+	}
+}
+
+func TestFamilyStatusNoMembership(t *testing.T) {
+	client := setupTestFirestore(t)
+	defer client.Close()
+
+	server := httptest.NewServer(setupTestRouter(client))
+	defer server.Close()
+
+	resp := doRequest(server, "GET", "/family/", nil, "outsider-token")
+	if resp.StatusCode != 404 {
+		t.Errorf("Expected 404, got %d: %v", resp.StatusCode, resp.Body)
 	}
 }

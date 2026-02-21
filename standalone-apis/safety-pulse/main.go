@@ -57,6 +57,9 @@ func main() {
 	// Org bucket routes (beacons, pings)
 	buckets.RegisterOpenBucketRoutes(r, firestoreClient, authMiddleware)
 
+	// Family routes (create, join, status)
+	registerFamilyRoutes(r, firestoreClient, authMiddleware)
+
 	// Health check — verifies Firestore connectivity
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Try a lightweight Firestore read to verify connectivity
