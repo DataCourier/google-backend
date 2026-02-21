@@ -1,0 +1,15 @@
+{
+  "_comment": "SafetyPulse org bucket resource definitions",
+  "_roles": "owner > admin > manager > member > guest",
+
+  "resources": {
+    "beacons": {
+      "write": "member",
+      "default_visibility": "org-wide"
+    },
+    "pings": {
+      "write": "member",
+      "default_visibility": "private"
+    }
+  }
+}
