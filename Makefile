@@ -106,6 +106,7 @@ deploy-safety:
 	@cd standalone-apis/safety-pulse && \
 		gcloud run deploy safety-pulse \
 		--source . \
+		--project michal-playground-2026 \
 		--region $(GCP_REGION) \
 		--allow-unauthenticated \
 		--platform managed \
