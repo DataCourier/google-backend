@@ -60,6 +60,9 @@ func main() {
 	// Family routes (create, join, status)
 	registerFamilyRoutes(r, firestoreClient, authMiddleware)
 
+	// Beacon routes (ping, list pings, get, update, delete)
+	registerBeaconRoutes(r, firestoreClient, authMiddleware)
+
 	// Health check — verifies Firestore connectivity
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Try a lightweight Firestore read to verify connectivity
