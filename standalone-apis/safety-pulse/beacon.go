@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -98,7 +99,7 @@ func beaconPingHandler(client *firestore.Client) http.HandlerFunc {
 		// Write ping to Firestore
 		_, err = client.Collection("org-pings").Doc(pingID).Set(r.Context(), pingDoc)
 		if err != nil {
-			// Log error but still try to respond
+			log.Printf("ERROR: failed to save ping beacon_id=%s org_id=%s error=%v", beaconID, orgID, err)
 			buckets.RespondJSON(w, http.StatusInternalServerError, map[string]string{
 				"error":     "failed to save ping",
 				"detail":    err.Error(),
@@ -107,11 +108,15 @@ func beaconPingHandler(client *firestore.Client) http.HandlerFunc {
 			return
 		}
 
+		log.Printf("PING beacon_id=%s org_id=%s source=%v battery=%v", beaconID, orgID, payload["ping_source"], payload["battery_level"])
+
 		// Update beacon's last_seen_at (best effort — don't fail the ping)
-		client.Collection("org-beacons").Doc(beaconID).Update(r.Context(), []firestore.Update{
+		if _, err := client.Collection("org-beacons").Doc(beaconID).Update(r.Context(), []firestore.Update{
 			{Path: "last_seen_at", Value: now},
 			{Path: "updated_at", Value: now},
-		})
+		}); err != nil {
+			log.Printf("WARN: failed to update last_seen_at beacon_id=%s error=%v", beaconID, err)
+		}
 
 		buckets.RespondJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": pingID,

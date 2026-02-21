@@ -66,10 +66,8 @@ func setupTestRouter(client *firestore.Client) http.Handler {
 	registerFamilyRoutes(r, client, mockAuth)
 	registerBeaconRoutes(r, client, mockAuth)
 
-	// Health check
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		buckets.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	// Health check — same as production
+	r.Get("/health", healthHandler(client))
 
 	return r
 }
