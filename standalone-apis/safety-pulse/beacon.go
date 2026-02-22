@@ -150,18 +150,20 @@ func beaconListPingsHandler(client *firestore.Client) http.HandlerFunc {
 			query = query.Where("created_by", "==", userID)
 		}
 
-		// Time range filters
+		// Parse time range filters
+		var fromTime, toTime time.Time
 		if from := r.URL.Query().Get("from"); from != "" {
 			if t, err := time.Parse(time.RFC3339, from); err == nil {
-				query = query.Where("received_at", ">=", t)
+				fromTime = t
 			}
 		}
 		if to := r.URL.Query().Get("to"); to != "" {
 			if t, err := time.Parse(time.RFC3339, to); err == nil {
-				query = query.Where("received_at", "<=", t)
+				toTime = t
 			}
 		}
 
+		// Fetch all pings for beacon, filter in code (avoids composite index requirement)
 		iter := query.Documents(r.Context())
 		var pings []map[string]interface{}
 		for {
@@ -172,7 +174,16 @@ func beaconListPingsHandler(client *firestore.Client) http.HandlerFunc {
 			if err != nil {
 				continue
 			}
-			pings = append(pings, doc.Data())
+			data := doc.Data()
+			if receivedAt, ok := data["received_at"].(time.Time); ok {
+				if !fromTime.IsZero() && receivedAt.Before(fromTime) {
+					continue
+				}
+				if !toTime.IsZero() && receivedAt.After(toTime) {
+					continue
+				}
+			}
+			pings = append(pings, data)
 		}
 
 		if pings == nil {
